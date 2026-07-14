@@ -423,11 +423,20 @@ void loop() {
     if (curScreen == (int)SCR_DASHBOARD && s_prevScreen != (int)SCR_DASHBOARD) g_lastNav = millis();
     s_prevScreen = curScreen;
 
-    // "Add your API key" screen: the moment a key is entered via the web interface, move on.
-    if (ui.screen() == SCR_NEEDKEY && config.hasApiKey()) {
-        pushChannelsToUi();
-        enterDashboard();
-        triggerFetch();
+    // "Add your API key" screen: keep the live spinner moving, and the moment a key is entered via the
+    // web interface, move on to the dashboard.
+    if (ui.screen() == SCR_NEEDKEY) {
+        if (config.hasApiKey()) {
+            pushChannelsToUi();
+            enterDashboard();
+            triggerFetch();
+        } else {
+            static uint32_t s_needKeyAnim = 0;
+            if (millis() - s_needKeyAnim > 1400) {
+                s_needKeyAnim = millis();
+                ui.animateNeedKey();
+            }
+        }
     }
 
     if (ui.screen() == SCR_DASHBOARD) {

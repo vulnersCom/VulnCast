@@ -677,45 +677,59 @@ void Ui::showSetup(const String &apSsid, const String &apPass, const String &url
 // Online, but no Vulners API key yet: the key is entered through the web interface (never on-device),
 // so guide the user there with the device's live IP + a scannable link. main.cpp advances to the
 // dashboard automatically once a key lands (config.hasApiKey()).
+// Rotating "comet" cell (partial-update animated) so the screen feels alive while it waits for a key.
+void Ui::drawNeedKeySpinner() {
+    static const int8_t ox[8] = {14, 10, 0, -10, -14, -10, 0, 10};
+    static const int8_t oy[8] = {0, 10, 14, 10, 0, -10, -14, -10};
+    const int cx = 46, cy = 374;
+    fillRect(cx - 17, cy - 17, 35, 35, PAPER);  // clear the cell (partial diff -> only this box repaints)
+    for (int i = 0; i < 8; i++) {
+        int d = (_needKeyPhase - i) & 7;                 // 0 = bright head, trailing dots fade -> motion
+        int r = d == 0 ? 5 : d == 1 ? 4 : d == 2 ? 3 : 2;
+        gDot(cx + ox[i], cy + oy[i], r, INK);
+    }
+}
+
 void Ui::showNeedKey(const String &ip) {
     _scr = SCR_NEEDKEY;
+    _needKeyIp = ip;
+    _needKeyPhase = 0;
     beginFrame();
+    // Header: a filled dot + "ONLINE" — deliberately NOT the offline "SETUP" bar, so the jump from the
+    // provisioning screen reads as real progress, plus a "STEP 2 / 2" to signal we're nearly done.
     fillRect(0, 0, W, 58, INK);
-    text(JB_B22, 22, 37, "SETUP", WHITE, INK);
-    // right of the header: "Wi-Fi ✓ online" (we're connected — that's why we're on this screen)
-    int rx = W - 22;
-    int ow = textW(JB_R19, "online");
-    text(JB_R19, rx - ow, 37, "online", GRAY6, INK);
-    rx -= ow + 12;
-    gCheck(rx - 16, 20, 16, WHITE);
-    rx -= 22;
-    text(JB_R19, rx - textW(JB_R19, "Wi-Fi"), 37, "Wi-Fi", GRAY6, INK);
+    gDot(32, 27, 6, WHITE);
+    text(JB_B22, 48, 37, "ONLINE", WHITE, INK);
+    const char *step = "STEP 2 / 2";
+    text(JB_B20, W - 22 - textW(JB_B20, step), 37, step, GRAY6, INK);
 
-    // left column — what to do
-    text(JB_X36, 28, 108, "Add your API key", INK);
-    text(JB_M20, 28, 150, "You're online. VulnCast needs your", INK2);
-    text(JB_M20, 28, 178, "Vulners API key to pull feeds.", INK2);
-    const char *steps[2] = {"Open the web interface in a browser",
-                            "Paste your Vulners API key & save"};
-    int sy = 212;
-    for (int i = 0; i < 2; ++i) {
-        rect(28, sy, 38, 38, 2, INK);
-        char n[2] = {char('1' + i), 0};
-        textAlign(JB_B22, 28, sy + 27, 38, C, n, INK);
-        text(JB_M20, 80, sy + 27, steps[i], INK2);
-        sy += 58;
-    }
-    text(JB_R16, 28, sy + 26, "Get a key at docs.vulners.com", GRAY3);
+    // Left column — you're in, one thing left, and where to go.
+    text(JB_X36, 28, 118, "You\xE2\x80\x99re online.", INK);
+    text(JB_M20, 28, 160, "One step left \xE2\x80\x94 add your", INK2);
+    text(JB_M20, 28, 188, "Vulners API key.", INK2);
+    text(JB_R16, 28, 250, "OPEN IN YOUR BROWSER", GRAY3);
+    textFit(JB_X34, 28, 292, 522, ("http://" + ip).c_str(), INK);
+    text(JB_R17, 28, 324, "or  http://vulncast.local", GRAY3);
+    // Live "listening" indicator (animated via animateNeedKey()).
+    drawNeedKeySpinner();
+    text(JB_M20, 78, 382, "Listening for your key\xE2\x80\xA6", INK2);
+    text(JB_R16, 28, 456, "Need a key? Get one at docs.vulners.com", GRAY3);
 
-    // right column — where to go (live IP + QR to the key page)
+    // Right column — the hero: a big QR straight to the on-device key page.
     vline(578, 60, 480, INK, 2);
-    rect(604, 137, 330, 128, 2, GRAY4);
-    text(JB_R16, 622, 172, "OPEN IN YOUR BROWSER", GRAY3);
-    textFit(JB_B24, 620, 212, 300, ("http://" + ip).c_str(), INK);
-    text(JB_R17, 622, 244, "or  http://vulncast.local", GRAY3);
+    textAlign(JB_B20, 578, 120, 380, C, "SCAN TO ADD YOUR KEY", INK);
     String url = "http://" + ip + "/apikey";
-    qrCode(694, 285, 150, url.c_str(), INK);
-    textAlign(JB_R16, 578, 466, 380, C, "Scan to add your key", GRAY3);
+    qrCode(651, 152, 214, url.c_str(), INK);
+    textAlign(JB_R17, 578, 410, 380, C, "opens the key page on your phone", GRAY3);
+    presentScreen();
+}
+
+// Advance the live spinner (partial update only — no full flash). Called ~1.4 s from loop() while the
+// device waits on this screen.
+void Ui::animateNeedKey() {
+    if (_scr != SCR_NEEDKEY) return;
+    _needKeyPhase++;
+    drawNeedKeySpinner();
     presentScreen();
 }
 

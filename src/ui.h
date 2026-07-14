@@ -60,6 +60,7 @@ public:
     void showConnecting(const String &ssid, int step);  // step: 0..4 completed
     void showSetup(const String &apSsid, const String &apPass, const String &url, int saved);
     void showNeedKey(const String &ip);  // online but no API key: point the user at the web interface
+    void animateNeedKey();               // advance the live "listening" spinner (called ~1.4 s from loop)
 
     // Data-driven screens.
     void showDashboard(const UiStatus &st);          // full clean redraw (entry / rotation / data)
@@ -134,6 +135,11 @@ private:
     int _tzScroll = 0;   // first visible timezone row
     int _wifiScroll = 0; // first visible Wi-Fi network row (settings)
     int _feedScroll = 0; // first visible feed/channel row (settings)
+
+    // "Add your API key" screen: live spinner state (animated via animateNeedKey).
+    String _needKeyIp;
+    uint8_t _needKeyPhase = 0;
+    void drawNeedKeySpinner();  // the rotating "listening" comet (partial-update cell)
 
     // Document detail state.
     String _docId;
