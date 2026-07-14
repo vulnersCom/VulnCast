@@ -18,7 +18,7 @@ stop refreshing notifications, mail, and JSON for vulnerability alerts. It watch
 [![PlatformIO](https://img.shields.io/badge/PlatformIO-FF7F00?style=for-the-badge&logo=platformio&logoColor=white)](https://platformio.org/)
 [![Display](https://img.shields.io/badge/4.7%22%20E--Paper-111111?style=for-the-badge)](#-hardware)
 [![Data: Vulners](https://img.shields.io/badge/Data-Vulners%20API-E85A34?style=for-the-badge)](https://vulners.com/)
-[![Release](https://img.shields.io/badge/release-v1.0.2-111111?style=for-the-badge)](https://github.com/vulnersCom/VulnCast/releases)
+[![Release](https://img.shields.io/badge/release-v1.0.3-111111?style=for-the-badge)](https://github.com/vulnersCom/VulnCast/releases)
 
 <br>
 
@@ -113,13 +113,13 @@ enter Wi-Fi and your Vulners API key on the device via the captive portal; nothi
 Prefer the CLI? Flash the same image with [esptool](https://docs.espressif.com/projects/esptool/):
 
 ```bash
-esptool.py --chip esp32s3 write_flash 0x0 flasher/firmware/vulncast-1.0.2-esp32s3.factory.bin
+esptool.py --chip esp32s3 write_flash 0x0 flasher/firmware/vulncast-1.0.3-esp32s3.factory.bin
 ```
 
-**Verify the image first** — SHA-256 of `vulncast-1.0.2-esp32s3.factory.bin`:
+**Verify the image first** — SHA-256 of `vulncast-1.0.3-esp32s3.factory.bin`:
 
 ```
-3b5b24c81e3c1d44a80addc6320bfe5a27411f6b8ea4c79b9ae0645a8c05577f
+e2d7f6792ae2dd00db5cb9e20ff1c56b7202643767a657d55944546b45d3db75
 ```
 
 ## 🚀 Build & flash (from source)
