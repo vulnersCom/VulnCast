@@ -494,11 +494,11 @@ void Ui::serviceJump() {
             break;
         }
         case '3': showSettings(); break;
-        case '4': showKeyboard("OFFICE-5G"); break;
+        case '4': showKeyboard("OFFICE-2.4G"); break;
         case '5': showInterval(activeId()); break;
         case '6': showTimezone(); break;
         case '7': showBoot(3, "display \xC2\xB7 storage \xC2\xB7 radio"); break;
-        case '8': showConnecting("OFFICE-5G", 2); break;
+        case '8': showConnecting("OFFICE-2.4G", 2); break;
         case '9': showSetup("VulnCast-Setup", "vulncast-setup", "192.168.4.1", 0); break;
         case 'K': showNeedKey("192.168.1.42"); break;  // preview the "add your API key" screen
     }
