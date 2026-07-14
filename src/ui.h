@@ -19,6 +19,7 @@ enum UiScreen {
     SCR_KEYBOARD,
     SCR_INTERVAL,
     SCR_TIMEZONE,
+    SCR_NEEDKEY,   // connected but no Vulners API key yet -> "enter it via the web interface"
 };
 
 // Events surfaced by poll() for main to act on.
@@ -58,6 +59,7 @@ public:
     void showBoot(int stage, const char *caption);   // stage 0..4 progress
     void showConnecting(const String &ssid, int step);  // step: 0..4 completed
     void showSetup(const String &apSsid, const String &apPass, const String &url, int saved);
+    void showNeedKey(const String &ip);  // online but no API key: point the user at the web interface
 
     // Data-driven screens.
     void showDashboard(const UiStatus &st);          // full clean redraw (entry / rotation / data)

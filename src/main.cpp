@@ -205,7 +205,7 @@ void consoleDispatch(char c) {
         case 'n': ui.injectTouch(925, 174); Serial.println(F("[ch] next")); break;  // ▸ pager
         case 'p': ui.injectTouch(35, 174); Serial.println(F("[ch] prev")); break;   // ◂ pager
         case '1': case '2': case '3': case '4': case '5':
-        case '6': case '7': case '8': case '9': case 'V':
+        case '6': case '7': case '8': case '9': case 'V': case 'K':
             ui.requestJump(c);  // drawing happens on the UI loop
             Serial.printf("[jump] %c queued\n", c);
             break;
@@ -306,10 +306,16 @@ void onConnected() {
     // diagnostics, OTA, the first fetch) are deferred so nothing contends the e-paper I2S DMA during
     // the connect-time paint (concurrent PSRAM/TLS work wedges the panel).
     timeKeeper.onConnected();  // configTzTime: starts async SNTP, returns immediately (no net I/O)
-    pushChannelsToUi();
-    enterDashboard();
-    g_needNetServices = true;  // loop() brings up mDNS diagnostics + OTA next iteration
-    g_uiReady = true;          // fetch task may now hit the network (dashboard is already up)
+    // No API key yet -> the dashboard can't fetch anything. Send the user to the web interface to add
+    // it (the key is entered there, never on-device); loop() auto-advances once a key lands.
+    if (!config.hasApiKey()) {
+        ui.showNeedKey(WiFi.localIP().toString());
+    } else {
+        pushChannelsToUi();
+        enterDashboard();
+    }
+    g_needNetServices = true;  // loop() brings up mDNS diagnostics + the web server (needed to enter the key!)
+    g_uiReady = true;          // fetch task may now hit the network (a screen is already up)
     triggerFetch();
 }
 
@@ -416,6 +422,13 @@ void loop() {
     int curScreen = (int)ui.screen();
     if (curScreen == (int)SCR_DASHBOARD && s_prevScreen != (int)SCR_DASHBOARD) g_lastNav = millis();
     s_prevScreen = curScreen;
+
+    // "Add your API key" screen: the moment a key is entered via the web interface, move on.
+    if (ui.screen() == SCR_NEEDKEY && config.hasApiKey()) {
+        pushChannelsToUi();
+        enterDashboard();
+        triggerFetch();
+    }
 
     if (ui.screen() == SCR_DASHBOARD) {
         // Update-driven feed switch (replaces the old 45s timer): the fetch task bumps an update
