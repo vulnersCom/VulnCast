@@ -1,0 +1,4 @@
+# Flash-critical paths — a change here ships firmware / CI to everyone, so require owner review.
+# Enable "Require review from Code Owners" in main's branch protection for this to bite.
+/.github/    @vulnersCom
+/flasher/    @vulnersCom

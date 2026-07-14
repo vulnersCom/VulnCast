@@ -1,0 +1,10 @@
+# Weekly PRs to bump the (SHA-pinned) GitHub Actions in .github/workflows/.
+# Policy: all actions pinned to a full commit SHA; review third-party actions before adoption.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"

@@ -1,0 +1,34 @@
+# === Secrets — NEVER commit ===
+secrets.yaml
+secrets.yml
+*.secret
+.env
+.env.*
+# Generated firmware secrets header (built from secrets.yaml at compile time).
+include/secrets.h
+
+# === Development-process artifacts — local-only, NOT published ===
+# Working docs, AI-assistant instructions, and agent memory used while building
+# the firmware. Public contributor guidance lives in CONTRIBUTING.md instead.
+docs/
+CLAUDE.md
+CLAUDE.local.md
+.github/copilot-instructions.md
+.claude/
+
+# === Firmware artifacts ===
+*.bin
+.pio/
+build/
+# ...but the SHIPPED release binary for the browser flasher IS tracked (reviewable in git history).
+!flasher/firmware/*.bin
+
+# === Build-hook Python bytecode (scripts/gen_secrets.py) ===
+__pycache__/
+*.py[cod]
+
+# === OS / editor ===
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

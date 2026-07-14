@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VulnCast — Flash it</title>
+<meta name="description" content="Flash VulnCast to your LilyGo T5 4.7&quot; E-Paper S3 straight from the browser — no build, no esptool.">
+<!-- The flash-driving JS is self-hosted (flasher/vendor/), so a strict CSP blocks any external script
+     and clickjacking of a page that writes firmware. esp-web-tools 10.3.0 needs no eval/WASM/workers. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
+<style>
+  :root { --coral:#e85a34; --bg:#0d0d0f; --panel:#161619; --ink:#f2f2f2; --mut:#9a9aa2; --line:#2a2a30; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:720px; margin:0 auto; padding:56px 22px 72px; }
+  header { text-align:center; }
+  .logo { font-size:34px; font-weight:800; letter-spacing:-.5px; }
+  .logo .c { color:var(--coral); }
+  h1 { font-size:44px; margin:18px 0 4px; letter-spacing:-1px; }
+  .sub { color:var(--mut); font-size:16px; margin:0 0 6px; font-style:italic; }
+  .price { display:inline-block; margin-top:10px; color:var(--coral); border:1px solid var(--coral);
+    border-radius:999px; padding:3px 12px; font-size:13px; }
+  .cta { text-align:center; margin:40px 0 8px; }
+  .btn { background:var(--coral); color:#fff; border:0; border-radius:12px; padding:16px 30px;
+    font:inherit; font-weight:800; font-size:18px; cursor:pointer; transition:filter .15s; }
+  .btn:hover { filter:brightness(1.08); }
+  .note { text-align:center; color:var(--mut); font-size:13px; margin-top:12px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px 26px; margin:26px 0; }
+  .panel h2 { font-size:15px; text-transform:uppercase; letter-spacing:1px; color:var(--mut); margin:0 0 14px; }
+  ol { margin:0; padding-left:22px; } ol li { margin:8px 0; }
+  ol li b { color:var(--coral); }
+  a { color:var(--coral); text-decoration:none; } a:hover { text-decoration:underline; }
+  code { background:#000; border:1px solid var(--line); border-radius:6px; padding:1px 6px; font-size:.9em; }
+  footer { text-align:center; color:var(--mut); font-size:13px; margin-top:40px; }
+  .warn { color:#ffcc66; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">⚡ VULN<span class="c">CAST</span></div>
+    <h1>Feels like 9.8.</h1>
+    <p class="sub">The internet's security forecast on your desk.</p>
+    <div class="price">~$40 · LilyGo T5 4.7" E-Paper S3</div>
+  </header>
+
+  <div class="cta">
+    <esp-web-install-button manifest="./manifest.json">
+      <button slot="activate" class="btn">⚡ Flash VulnCast</button>
+      <span slot="unsupported" class="note warn">
+        Web Serial isn't available here — open this page in desktop <b>Chrome</b>, <b>Edge</b>, or <b>Opera</b>.
+      </span>
+      <span slot="not-allowed" class="note warn">
+        Serial access was blocked. Make sure the page is served over HTTPS and try again.
+      </span>
+    </esp-web-install-button>
+    <p class="note">Plug the board in over USB-C first. Flashing takes ~1 minute and needs no build tools.</p>
+  </div>
+
+  <div class="panel">
+    <h2>How it works</h2>
+    <ol>
+      <li><b>Plug in</b> your LilyGo T5 4.7" E-Paper S3 with a USB-C cable.</li>
+      <li><b>Click "Flash VulnCast"</b> above and pick the board's serial port (it flashes over Web Serial — no esptool, no compiler).</li>
+      <li>On first boot the device raises a <b>VulnCast-Setup</b> Wi-Fi hotspot — join it, open the setup page, choose your network and paste your <a href="https://docs.vulners.com/docs/quickstart/authentication/">Vulners API key</a>.</li>
+      <li>Done — it starts forecasting the CVE weather. 🌩️</li>
+    </ol>
+  </div>
+
+  <div class="panel">
+    <h2>Prefer the command line?</h2>
+    <p>Flash the same image with <a href="https://docs.espressif.com/projects/esptool/">esptool</a>:</p>
+    <p><code>esptool.py --chip esp32s3 write_flash 0x0 vulncast-1.0.0-esp32s3.factory.bin</code></p>
+    <p class="note">The firmware is credential-free — you provision Wi-Fi and your API key on the device, nothing is baked in.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Verify the image</h2>
+    <p>SHA-256 of <code>vulncast-1.0.0-esp32s3.factory.bin</code>:</p>
+    <p><code>3fe7560ecbcf0c23261545dda24ecd7f7d1f0a231ca85fd58083884035c2a5f5</code></p>
+    <p class="note">Check it before flashing: <code>shasum -a 256 vulncast-1.0.0-esp32s3.factory.bin</code></p>
+  </div>
+
+  <footer>
+    Source, docs &amp; issues → <a href="https://github.com/vulnersCom/VulnCast">github.com/vulnersCom/VulnCast</a><br>
+    A <a href="https://vulners.com/">Vulners Inc.</a> project · flashed in-browser via
+    <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>.
+  </footer>
+</div>
+
+<!-- Self-hosted, pinned esp-web-tools 10.3.0 (vendored under flasher/vendor/ — reviewable in git,
+     no CDN in the flash path). Re-vendor deliberately on upgrade; never hot-link a moving range. -->
+<script type="module" src="./vendor/esp-web-tools/10.3.0/install-button.js"></script>
+</body>
+</html>
