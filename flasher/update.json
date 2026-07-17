@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
-  "url": "https://vulnerscom.github.io/VulnCast/firmware/vulncast-1.1.0-app.bin",
-  "size": 1975552,
-  "sha256": "720a58d5fedebb60702f97696101c73f54db3db4239eab4246b17aa57d6a63c6",
-  "sig": "OKUK000ALhvvUTFEKhJLoQSC6KMaHMvCCpYOzOrXAFs2cNcNcsGJZy34EtAVGYMdrIWxhSPSjVr2lu4clkvKCA=="
+  "version": "1.1.1",
+  "url": "https://vulnerscom.github.io/VulnCast/firmware/vulncast-1.1.1-app.bin",
+  "size": 1976736,
+  "sha256": "85f1cfc4a81e00459dd13c85e3255f3fdfca0c9c729832b0bfd7770693903fff",
+  "sig": "WNUqdc7SWZjlcvn5wsRdbs8NWowj64yqC3MSgIUCJkETwNoA4QBRK7roM+0CSTgw7f/qIeRi66LMdUIyAOPZBw=="
 }
