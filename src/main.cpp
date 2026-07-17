@@ -109,7 +109,7 @@ void consoleHelp() {
         "  F          force dashboard now (stop boot-connect churn; UI testing w/o wifi)\n"
         "  n / p      next / prev channel (dashboard)\n"
         "  r          refresh the active channel now\n"
-        "  u          OTA: crypto self-test + force an update-discovery check\n"
+        "  u          check for a firmware update now (forces the OTA check; + crypto self-test)\n"
         "  1-9 VKYUB preview a screen: 1 dashboard 2 document 3 settings 4 keyboard\n"
         "             5 interval 6 timezone 7 boot 8 connecting 9 setup V vuln-doc\n"
         "             K needkey Y reset-confirm U update B update-failed\n"
@@ -144,6 +144,16 @@ void consoleState() {
     Serial.printf("last draw: %s\n", gfx::lastFlushInfo());
     Serial.printf("fetch   : %s\n",
                   g_fetchTask && eTaskGetState(g_fetchTask) != eDeleted ? "task alive" : "task dead");
+    if (updater.available())
+        Serial.printf("update  : fw %s -> %s AVAILABLE\n", updater.currentVersion().c_str(),
+                      updater.availableVersion().c_str());
+    else
+        Serial.printf("update  : fw %s, %s\n", updater.currentVersion().c_str(),
+                      updater.phase() == Updater::CHECKING    ? "checking\xE2\x80\xA6"
+                      : updater.phase() == Updater::DOWNLOADING ? "downloading"
+                      : updater.phase() == Updater::INSTALLING  ? "installing"
+                      : updater.phase() == Updater::FAILED      ? "last attempt failed"
+                                                                : "up to date");
 }
 
 void consoleDispatch(char c) {
