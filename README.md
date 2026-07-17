@@ -18,7 +18,7 @@ stop refreshing notifications, mail, and JSON for vulnerability alerts. It watch
 [![PlatformIO](https://img.shields.io/badge/PlatformIO-FF7F00?style=for-the-badge&logo=platformio&logoColor=white)](https://platformio.org/)
 [![Display](https://img.shields.io/badge/4.7%22%20E--Paper-111111?style=for-the-badge)](#-hardware)
 [![Data: Vulners](https://img.shields.io/badge/Data-Vulners%20API-E85A34?style=for-the-badge)](https://vulners.com/)
-[![Release](https://img.shields.io/badge/release-v1.0.3-111111?style=for-the-badge)](https://github.com/vulnersCom/VulnCast/releases)
+[![Release](https://img.shields.io/badge/release-v1.0.4-111111?style=for-the-badge)](https://github.com/vulnersCom/VulnCast/releases)
 
 <br>
 
@@ -127,10 +127,11 @@ signing key lives only on the release machine.
 | `VULNCAST_OTA_REQUIRE_SIGNATURE` | `1` | `0` runs **signature-free** — for a fork that self-hosts updates without managing a signing key (integrity then rests on TLS + the manifest SHA-256). |
 | `VULNCAST_OTA_CHECK_INTERVAL_MS` | `3600000` | How often to check. |
 
-To cut a signed release: build the app image, then
-`python3 scripts/sign_manifest.py --version X.Y.Z --url <asset-url> --bin firmware.bin --out flasher/update.json`
-(the private key is read from `~/.vulncast/`, generated once by `scripts/gen_update_key.py`, and is
-never committed). Publish `update.json` to Pages and the app image as a GitHub Release asset.
+To cut a signed release: build the credential-free **app image** (`firmware.bin`, not the `.factory.bin`)
+and the browser-flasher **factory image**, drop both under `flasher/firmware/`, then
+`python3 scripts/sign_manifest.py --version X.Y.Z --url https://vulnerscom.github.io/VulnCast/firmware/vulncast-X.Y.Z-app.bin --bin flasher/firmware/vulncast-X.Y.Z-app.bin --out flasher/update.json`
+and push — GitHub Pages serves `update.json` + the app image (single origin, no redirect). The private
+key is read from `~/.vulncast/` (generated once by `scripts/gen_update_key.py`) and is never committed.
 
 ## ⚡ Flash it — no build required
 
@@ -145,13 +146,13 @@ enter Wi-Fi and your Vulners API key on the device via the captive portal; nothi
 Prefer the CLI? Flash the same image with [esptool](https://docs.espressif.com/projects/esptool/):
 
 ```bash
-esptool.py --chip esp32s3 write_flash 0x0 flasher/firmware/vulncast-1.0.3-esp32s3.factory.bin
+esptool.py --chip esp32s3 write_flash 0x0 flasher/firmware/vulncast-1.0.4-esp32s3.factory.bin
 ```
 
-**Verify the image first** — SHA-256 of `vulncast-1.0.3-esp32s3.factory.bin`:
+**Verify the image first** — SHA-256 of `vulncast-1.0.4-esp32s3.factory.bin`:
 
 ```
-e2d7f6792ae2dd00db5cb9e20ff1c56b7202643767a657d55944546b45d3db75
+60b323d3440cf1c1f05a9b4b4e525a6cc27f7e8fa3955a36a747f6668362cc93
 ```
 
 ## 🚀 Build & flash (from source)
