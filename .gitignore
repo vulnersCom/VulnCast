@@ -36,3 +36,6 @@ __pycache__/
 Thumbs.db
 .idea/
 *.swp
+
+# local-only art source images (cat samples etc.)
+/assets/

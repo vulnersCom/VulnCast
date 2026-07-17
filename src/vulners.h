@@ -55,4 +55,13 @@ public:
 
     // Validate an API key against Vulners (does not store it). Sets err on failure.
     static bool validateKey(const String &key, String &err);
+
+    // Account credits + license from GET /api/v3/apiKey/info/ (body field `data.credit`; Vulners does
+    // NOT put credits in a response header). serviceCredits() runs on the network task, self-throttled;
+    // the accessors are cheap cross-core reads for the status bar and the out-of-credits screen.
+    void serviceCredits(bool force = false);
+    long long creditsRemaining() const;  // last-known API credits (-1 = unknown / not yet fetched)
+    bool creditsKnown() const;           // a successful apiKey/info fetch has populated the balance
+    bool creditsExhausted() const;       // a credit-consuming call returned HTTP 429, or credit <= 0
+    String licenseType() const;          // "free"/"basic"/"pro"/"oem"/"" — worded on the out-of-credits screen
 };

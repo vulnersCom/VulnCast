@@ -11,6 +11,8 @@ namespace gfx {
 namespace {
 uint8_t *_fb = nullptr;
 uint8_t *_shadow = nullptr;  // last state pushed to the panel (for damage diffing)
+uint8_t *_plate = nullptr;   // static-backdrop snapshot: restore it under a sprite to erase it cleanly
+bool _autoDeghost = true;    // periodic whole-screen de-ghost (off in chill: sprites carry white edges)
 uint32_t _lastGc = 0;
 bool _hasShadow = false;
 RepaintMode _rmode = RP_SMART;
@@ -130,6 +132,20 @@ void blit(int x, int y, int w, int h, const uint8_t *data) {
     epd_copy_to_framebuffer(a, (uint8_t *)data, _fb);
 }
 
+// Blit a 4bpp sprite (2 px/byte, even-x = low nibble) but treat nibble 0x0 as TRANSPARENT — so a
+// masked cutout (the pipeline marks the background 0x0) lands on the scene without a bounding box.
+void blitMask(int x, int y, int w, int h, const uint8_t *data) {
+    int rb = w / 2;
+    for (int yy = 0; yy < h; ++yy) {
+        const uint8_t *row = data + (size_t)yy * rb;
+        for (int bx = 0; bx < rb; ++bx) {
+            uint8_t b = row[bx], lo = b & 0x0F, hi = b >> 4;
+            if (lo) setPx(x + 2 * bx, y + yy, (uint8_t)(lo << 4));
+            if (hi) setPx(x + 2 * bx + 1, y + yy, (uint8_t)(hi << 4));
+        }
+    }
+}
+
 void rect(int x, int y, int w, int h, int thick, uint8_t color) {
     for (int i = 0; i < thick; ++i) epd_draw_rect({x + i, y + i, w - 2 * i, h - 2 * i}, color, _fb);
 }
@@ -142,6 +158,43 @@ void vline(int x, int y, int h, uint8_t color, int thick) { epd_fill_rect({x, y,
 
 void line(int x0, int y0, int x1, int y1, uint8_t color) {
     epd_draw_line(x0, y0, x1, y1, color, _fb);
+}
+
+// ---- ordered dithering (fake the midtones the 2-bit panel can't show) -------
+// Bayer 4x4 threshold matrix (0..15): compare against `mix` to pick colA vs colB per pixel.
+static const uint8_t kBayer4[16] = {
+    0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5,
+};
+
+void setPx(int x, int y, uint8_t color) {
+    if ((unsigned)x >= (unsigned)W || (unsigned)y >= (unsigned)H) return;
+    uint8_t *p = _fb + y * kBytesPerRow + (x >> 1);
+    uint8_t n = color >> 4;
+    if (x & 1) *p = (uint8_t)((*p & 0x0F) | (n << 4));
+    else *p = (uint8_t)((*p & 0xF0) | n);
+}
+
+void ditherRect(int x, int y, int w, int h, uint8_t colA, uint8_t colB, int mix) {
+    if (w <= 0 || h <= 0) return;
+    if (mix <= 0) { fillRect(x, y, w, h, colA); return; }
+    if (mix >= 16) { fillRect(x, y, w, h, colB); return; }
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w > W ? W : x + w, y1 = y + h > H ? H : y + h;
+    for (int yy = y0; yy < y1; ++yy)
+        for (int xx = x0; xx < x1; ++xx)
+            setPx(xx, yy, kBayer4[((yy & 3) << 2) | (xx & 3)] < mix ? colB : colA);
+}
+
+void vGradient(int x, int y, int w, int h, uint8_t colTop, uint8_t colBottom) {
+    if (w <= 0 || h <= 0) return;
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w > W ? W : x + w, y1 = y + h > H ? H : y + h;
+    for (int yy = y0; yy < y1; ++yy) {
+        int mix = ((yy - y) * 17) / h;  // 0 at top -> ~16 at bottom
+        if (mix > 16) mix = 16;
+        for (int xx = x0; xx < x1; ++xx)
+            setPx(xx, yy, kBayer4[((yy & 3) << 2) | (xx & 3)] < mix ? colBottom : colTop);
+    }
 }
 
 // ---- text ------------------------------------------------------------------
@@ -490,6 +543,30 @@ void probe(int op) {
     _hasShadow = false;  // panel state now unknown -> next present() does a full paint
 }
 
+void requestFullNext() { _forceFullNext = true; }
+
+void setAutoDeghost(bool on) { _autoDeghost = on; }
+
+// Snapshot the framebuffer as the static backdrop. An animated scene draws its still parts, saves the
+// plate, then each frame restores a sprite's old box from it (= a clean, deterministic background) so
+// only the sprite's own pixels differ frame-to-frame -> partialUpdate drives ONLY them.
+void savePlate() {
+    if (!_plate) _plate = (uint8_t *)ps_malloc(kFbBytes);
+    if (_plate) memcpy(_plate, _fb, kFbBytes);
+}
+
+void restoreRect(int x, int y, int w, int h) {
+    if (!_plate || w <= 0 || h <= 0) return;
+    int x0 = (x < 0 ? 0 : x) & ~1;               // nibble align (2 px/byte)
+    int y0 = y < 0 ? 0 : y;
+    int x1 = (x + w + 1) & ~1, y1 = y + h;
+    if (x1 > W) x1 = W;
+    if (y1 > H) y1 = H;
+    if (x1 <= x0 || y1 <= y0) return;  // box fully off-screen -> a negative (x1-x0) would wrap the memcpy len
+    for (int yy = y0; yy < y1; ++yy)
+        memcpy(_fb + yy * kBytesPerRow + x0 / 2, _plate + yy * kBytesPerRow + x0 / 2, (x1 - x0) / 2);
+}
+
 void setRepaintMode(RepaintMode m) { _rmode = m; }
 RepaintMode repaintMode() { return _rmode; }
 const char *repaintModeName() { return _rmode == RP_FULL ? "FULL (flashy full update every change)" : "SMART (flash-free 2-bit partial of the changed rows)"; }
@@ -570,7 +647,7 @@ void present() {
     snprintf(_lastKind, sizeof(_lastKind), "partial rows %d-%d 2bpp %lums", y0, y0 + h - 1,
              (unsigned long)_lastMs);
     _ghostBudget += 1;
-    if (_ghostBudget >= GHOST_MAX || (millis() - _lastGc) > GC_MS) _forceFullNext = true;
+    if (_autoDeghost && (_ghostBudget >= GHOST_MAX || (millis() - _lastGc) > GC_MS)) _forceFullNext = true;
 
     // Self-check on the UI thread (single fb writer -> atomic): every changed byte must now be
     // mirrored into the shadow. The normal (in-sync) case is a single memcmp; only on a real desync

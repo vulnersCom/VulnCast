@@ -67,6 +67,7 @@ void fetchTask(void *) {
         }
         wifiManager.serviceKeyCheck();  // blocking HTTPS validation, off the UI loop
         channels.tick(vulners);
+        if (wifiManager.apiKeyValid()) vulners.serviceCredits();  // refresh the credit balance (throttled)
         updater.tick();                 // self-throttled hourly update discovery, off the UI loop
     }
 }
@@ -110,9 +111,9 @@ void consoleHelp() {
         "  n / p      next / prev channel (dashboard)\n"
         "  r          refresh the active channel now\n"
         "  u          check for a firmware update now (forces the OTA check; + crypto self-test)\n"
-        "  1-9 VKYUB preview a screen: 1 dashboard 2 document 3 settings 4 keyboard\n"
+        "  1-9 VKYUBLO preview a screen: 1 dashboard 2 document 3 settings 4 keyboard\n"
         "             5 interval 6 timezone 7 boot 8 connecting 9 setup V vuln-doc\n"
-        "             K needkey Y reset-confirm U update B update-failed\n"
+        "             K needkey Y reset-confirm U update B update-failed L chill O no-credits\n"
         "  R          reboot the device\n"
         " REFERENCE\n"
         "  screen ids (s/i): 0 boot 1 connecting 2 setup 3 dashboard 4 document\n"
@@ -248,7 +249,7 @@ void consoleDispatch(char c) {
         case 'n': ui.injectTouch(925, 174); Serial.println(F("[ch] next")); break;  // ▸ pager
         case 'p': ui.injectTouch(35, 174); Serial.println(F("[ch] prev")); break;   // ◂ pager
         case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
-        case 'V': case 'K': case 'Y': case 'U': case 'B':
+        case 'V': case 'K': case 'Y': case 'U': case 'B': case 'L': case 'O':
             ui.requestJump(c);  // drawing happens on the UI loop
             Serial.printf("[jump] %c queued\n", c);
             break;
@@ -306,6 +307,9 @@ UiStatus buildStatus() {
     }
     s.apiKeySet = config.hasApiKey();
     s.apiKeyValid = wifiManager.apiKeyValid();
+    s.creditsKnown = vulners.creditsKnown();
+    s.apiCredits = vulners.creditsRemaining();
+    s.licenseType = vulners.licenseType();
     s.timeSynced = timeKeeper.synced();
     s.timeStr = timeKeeper.localTime();
     if (s.timeSynced) s.dateStr = timeKeeper.formatLocal("%a %d %b %Y", "", true);
@@ -498,6 +502,15 @@ void loop() {
         }
     }
 
+    // Chill mode (lofi screensaver): keep the CVE feed scrolling and the sailboat drifting at a calm cadence.
+    if (ui.screen() == SCR_CHILL) {
+        static uint32_t s_chillAnim = 0;
+        if (millis() - s_chillAnim > 1500) {
+            s_chillAnim = millis();
+            ui.animateChill();
+        }
+    }
+
     // Surface a discovered firmware update: navigate to the offer once per version, only when idle on
     // the dashboard and outside the read-grace window (never yank the screen mid-read).
     if (updater.available() && ui.screen() == SCR_DASHBOARD &&
@@ -506,13 +519,24 @@ void loop() {
         ui.showUpdate();
     }
 
+    // Surface the out-of-credits screen once per exhaustion episode, only when idle on the dashboard and
+    // outside the read-grace window. Re-arms when credits recover (a monthly reset or an upgrade).
+    static bool s_creditsShown = false;
+    if (!vulners.creditsExhausted()) {
+        s_creditsShown = false;
+    } else if (!s_creditsShown && ui.screen() == SCR_DASHBOARD && millis() - g_lastNav > kNavGraceMs) {
+        s_creditsShown = true;
+        ui.showNoCredits();
+    }
+
     // Fresh-install health check (only ever true right after an OTA): mark the new image valid once it
     // boots through to a live UI without crashing. We do NOT require live Wi-Fi — a transient outage must
     // never roll back a good build, and reaching the setup-AP fallback still proves the image runs. A
     // crash/hang that never reaches a terminal screen fails the deadline -> rollback; a hard boot-loop is
     // caught by the RTC three-strikes guard in updater.begin().
     if (updater.verifyPending()) {
-        bool ran = (ui.screen() == SCR_DASHBOARD || ui.screen() == SCR_NEEDKEY || ui.screen() == SCR_SETUP);
+        bool ran = (ui.screen() == SCR_DASHBOARD || ui.screen() == SCR_NEEDKEY ||
+                    ui.screen() == SCR_SETUP || ui.screen() == SCR_CHILL);
         if (ran) updater.markHealthyIfPending();
         else if (updater.verifyDeadlinePassed()) updater.rollbackAndReboot();  // does not return
     }

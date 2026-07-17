@@ -408,12 +408,12 @@ bool Ui::readTouch(int &x, int &y) {
 }
 
 namespace {
-const char *kScrNames[] = {"boot",     "connecting", "setup",    "dashboard", "document", "settings",
-                           "keyboard", "interval",   "timezone", "needkey",   "reset?",   "update",
-                           "updfail"};
+const char *kScrNames[] = {"boot",     "connecting", "setup",    "dashboard", "document",  "settings",
+                           "keyboard", "interval",   "timezone", "needkey",   "reset?",    "update",
+                           "updfail",  "chill",      "nocredits"};
 }  // namespace
 
-const char *Ui::screenName() const { return _scr <= SCR_UPDATE_FAILED ? kScrNames[_scr] : "?"; }
+const char *Ui::screenName() const { return _scr <= SCR_NOCREDITS ? kScrNames[_scr] : "?"; }
 
 void Ui::requestJump(char c) { _pendingJump = c; }  // queued by the console task
 void Ui::requestTest(int n) { _pendingTest = n; }
@@ -426,6 +426,10 @@ void Ui::presentScreen() { gfx::present(); }
 
 // Every screen opens by clearing to paper and drawing the 2px frame border.
 void Ui::beginFrame() {
+    // Every screen opens here, so this is the choke point that restores the normal periodic de-ghost:
+    // chill mode disables it (setAutoDeghost(false)) AFTER its own beginFrame(), and leaving chill by
+    // ANY path (tap, Wi-Fi reconnect-portal, debug jump) re-enters some show*() -> beginFrame() -> on.
+    gfx::setAutoDeghost(true);
     clear(PAPER);
     rect(0, 0, W, H, 2, INK);
 }
@@ -506,10 +510,23 @@ void Ui::serviceJump() {
         case 'Y': showResetConfirm(); break;           // preview the factory-reset confirm gate
         case 'U': updater.devPreviewAvailable(); showUpdate(); break;  // preview the update offer
         case 'B': updater.devPreviewRollback(); showUpdateFailed(); break;  // preview the rollback screen
+        case 'L': showChill(); break;                  // preview the lofi chill-mode screensaver
+        case 'O': showNoCredits(); break;              // preview the out-of-credits screen
     }
 }
 
 // ---- shared chrome ---------------------------------------------------------
+
+// Compact remaining-credit count for the status bar: exact under 10k, then k / M / B with one decimal
+// (a free key shows e.g. "2847", an OEM key "10.0B"). Buffer >= 8 bytes.
+static void formatCredits(long long c, char *out, size_t n) {
+    if (c < 0) { strlcpy(out, "\xE2\x80\x94", n); return; }  // em-dash = unknown
+    if (c < 10000) { snprintf(out, n, "%lld", c); return; }
+    double v = (double)c;
+    if (c < 1000000LL) snprintf(out, n, "%.0fk", v / 1000.0);
+    else if (c < 1000000000LL) snprintf(out, n, "%.1fM", v / 1e6);
+    else snprintf(out, n, "%.1fB", v / 1e9);
+}
 
 void Ui::drawStatusBar(const UiStatus &st) {
     fillRect(0, 0, W, 58, INK);
@@ -520,7 +537,7 @@ void Ui::drawStatusBar(const UiStatus &st) {
     char buf[48];
     snprintf(buf, sizeof(buf), "SYNC %s", st.syncAgeMin < 0 ? "\xE2\x80\x94" : (String(st.syncAgeMin) + "m").c_str());
     x += text(JB_B20, x, by, buf, WHITE, INK) + 26;
-    // API status
+    // API status (the remaining-credit balance lives in the dashboard footer, not here).
     if (st.apiKeyValid) {
         x += text(JB_B20, x, by, "API", WHITE, INK) + 10;
         gCheck(x, 20, 16, WHITE);
@@ -851,6 +868,16 @@ void Ui::renderDashboard(const UiStatus &st) {
     String pub = have ? champ.published.substring(0, 10) : String();
     drawFooter("", pub.length() ? (String("Published ") + pub).c_str() : nullptr);
     text(JB_B20, 22, H - 14, "v" VULNCAST_FW_VERSION, WHITE, INK);  // firmware version, bold/bright
+    // Remaining Vulners API credits, centered in the footer. Both parts are bold and light (GRAY4
+    // collapses to a near-invisible dark grey on the 2-bit panel's black footer, so the label is GRAY6).
+    if (st.creditsKnown) {
+        char cr[24];
+        formatCredits(st.apiCredits, cr, sizeof(cr));
+        int tw = textW(JB_B16, "API CREDITS ") + textW(JB_B16, cr);
+        int fx = (W - tw) / 2;
+        fx += text(JB_B16, fx, H - 15, "API CREDITS ", GRAY6, INK);
+        text(JB_B16, fx, H - 15, cr, WHITE, INK);
+    }
 }
 
 // Content changes (screen entry, channel rotation, fresh data) do a full 16-gray
@@ -1215,6 +1242,43 @@ void Ui::showUpdateFailed() {
     presentScreen();
 }
 
+// Vulners API credits exhausted (a credit-consuming call returned 429, or apiKey/info reported credit
+// 0). Cached vulnerabilities keep showing; this screen explains the two ways forward — wait for the
+// monthly reset, or upgrade — with a QR straight to the pricing page. Any tap dismisses to the dashboard.
+void Ui::showNoCredits() {
+    _scr = SCR_NOCREDITS;
+    beginFrame();
+    fillRect(0, 0, W, 58, INK);
+    text(JB_B22, 30, 37, "OUT OF API CREDITS", WHITE, INK);
+    // license_type is API text -> fold to safe ASCII (never let a malformed byte reach epdiy's decoder).
+    String plan = gfx::renderable(_lastStatus.licenseType);  // "free"/"basic"/"pro"/... ("" if never fetched)
+    if (plan.length()) {
+        plan.toUpperCase();
+        String r = plan + " PLAN";
+        text(JB_B20, W - 22 - textW(JB_B20, r.c_str()), 37, r.c_str(), GRAY6, INK);
+    }
+
+    // Left column — what happened and the two ways forward.
+    text(JB_X36, 28, 126, "Out of API credits", INK);
+    text(JB_M20, 28, 174, "Your Vulners API credits for this month", INK2);
+    text(JB_M20, 28, 202, "are used up, so new feeds can\x27t be", INK2);
+    text(JB_M20, 28, 230, "fetched right now.", INK2);
+    text(JB_R16, 28, 288, "WHAT YOU CAN DO", GRAY3);
+    gDot(36, 320, 3, INK);
+    text(JB_M20, 52, 328, "Wait \xE2\x80\x94 credits refresh next month.", INK2);
+    gDot(36, 356, 3, INK);
+    text(JB_M20, 52, 364, "Upgrade to a commercial plan for", INK2);
+    text(JB_M20, 52, 392, "more monthly credits.", INK2);
+    text(JB_R16, 28, 470, "Cached items stay on screen. Tap anywhere to dismiss.", GRAY3);
+
+    // Right column — the hero: a QR straight to the pricing / upgrade page.
+    vline(578, 60, 480, INK, 2);
+    textAlign(JB_B20, 578, 120, 380, C, "UPGRADE YOUR PLAN", INK);
+    qrCode(651, 152, 214, "https://vulners.com/pricing", INK);
+    textAlign(JB_R17, 578, 410, 380, C, "vulners.com/pricing", GRAY3);
+    presentScreen();
+}
+
 // ---- interval / timezone pickers -------------------------------------------
 
 void Ui::showInterval(const String &channelId) {
@@ -1423,7 +1487,20 @@ UiEvent Ui::poll() {
     _fingerDown = true;
     _nextTouch = millis() + 120;
 
+    if (_scr == SCR_CHILL) {  // any tap wakes it: clean full repaint + restore the normal de-ghost
+        gfx::requestFullNext();
+        gfx::setAutoDeghost(true);
+        return EV_BACK;
+    }
+
     if (_scr == SCR_DASHBOARD) {
+        // Easter egg: tap the Vulners logo 5 times in quick succession -> lofi chill-mode screensaver.
+        if (x >= 8 && x <= 320 && y >= 62 && y <= 138) {
+            if (millis() - _logoTapMs > 1500) _logoTaps = 0;  // the run must be quick taps
+            _logoTapMs = millis();
+            if (++_logoTaps >= 5) { _logoTaps = 0; showChill(); }
+            return EV_NONE;
+        }
         if (x >= 790 && x <= 856 && y >= 67 && y <= 133) return EV_REFRESH;
         if (x >= 870 && x <= 936 && y >= 67 && y <= 133) return EV_SETTINGS;
         if (x >= 2 && x <= 68 && y >= 142 && y <= 206) return EV_PREV_CH;
@@ -1524,6 +1601,8 @@ UiEvent Ui::poll() {
         if (x >= 60 && x <= 360 && y >= 420 && y <= 496) return EV_BACK;  // OK -> dashboard
         return EV_NONE;
     }
+
+    if (_scr == SCR_NOCREDITS) return EV_BACK;  // any tap dismisses -> dashboard (cached data stays)
 
     if (_scr == SCR_INTERVAL) {
         if (backHit) { showSettings(); return EV_NONE; }

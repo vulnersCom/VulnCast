@@ -11,6 +11,19 @@ namespace {
 
 constexpr char kUrlLucene[] = "https://vulners.com/api/v3/search/lucene/";
 constexpr char kUrlById[] = "https://vulners.com/api/v3/search/id";
+constexpr char kUrlKeyInfo[] = "https://vulners.com/api/v3/apiKey/info/";  // GET -> data.credit / license_type
+
+// Account credit + license state, written by the network task (serviceCredits + the 429 detector in
+// postJson) and read by the UI task (status bar / out-of-credits screen). `credit` can exceed 2^31 on
+// an OEM key (billions), so it is int64 guarded by a spinlock (a 64-bit read is not atomic on Xtensa).
+// The license string is a fixed buffer (never realloc'd) so a cross-core read can't dangle.
+constexpr uint32_t kCreditRefreshMs = 3 * 60 * 1000;  // refresh the balance at most every ~3 min
+portMUX_TYPE s_creditMux = portMUX_INITIALIZER_UNLOCKED;
+long long s_credit = -1;         // last-known remaining credits (-1 = unknown); guarded by s_creditMux
+volatile bool s_exhausted = false;  // authoritative "out of credits": set only when credit == 0
+volatile bool s_force429 = false;   // a consuming call returned 429 -> force an immediate balance re-check
+char s_license[16] = {0};
+uint32_t s_creditAt = 0;         // millis() of the last successful apiKey/info fetch (0 = never)
 
 // Percent-encode a value for use in a URL query component.
 String urlEncode(const String &s) {
@@ -164,6 +177,7 @@ bool postJson(const char *url, const String &body, const JsonDocument &filter,
     https.addHeader("X-Api-Key", config.apiKey());
 
     const int code = https.POST(body);
+    if (code == 429) s_force429 = true;  // 429 = credits OR rate-limit; force a balance re-check to tell them apart
     if (code != HTTP_CODE_OK) {
         err = "HTTP " + String(code);
         https.end();
@@ -366,4 +380,61 @@ bool VulnersClient::validateKey(const String &key, String &err) {
     }
     err = "HTTP " + String(code);  // transient (e.g. Cloudflare 403/5xx) -> retry
     return false;
+}
+
+// Refresh the cached account credit balance via GET /api/v3/apiKey/info/ (the credit lives in the
+// response BODY as data.credit — Vulners does not send a credits response header). Self-throttled to
+// kCreditRefreshMs; pass force=true to refresh immediately (e.g. right after a key change). Runs on the
+// network task only. Keeps the last-known values on a transient failure; a 429 marks credits exhausted.
+void VulnersClient::serviceCredits(bool force) {
+    if (!config.hasApiKey()) return;
+    uint32_t nowMs = millis();
+    bool due = force || s_force429 || !s_creditAt ||
+               (uint32_t)(nowMs - s_creditAt) >= kCreditRefreshMs;  // a 429 forces an immediate re-check
+    if (!due) return;
+
+    WiFiClientSecure client;
+    HTTPClient https;
+    if (!configureHttps(client, https, kUrlKeyInfo, 8000)) return;
+    https.addHeader("X-Api-Key", config.apiKey());
+    int code = https.GET();
+    String body = https.getString();
+    https.end();
+
+    // Any exit BEFORE a balance is actually read leaves s_force429 set, so a 429-forced re-check keeps
+    // retrying next cycle instead of being silently dropped on a transient failure (Cloudflare 5xx, etc).
+    if (code != 200) return;
+    JsonDocument d;
+    if (deserializeJson(d, body)) return;
+    if (String(d["result"] | "") != "OK") return;
+    JsonObjectConst data = d["data"];
+    if (data.isNull() || data["credit"].isNull()) return;
+
+    long long credit = data["credit"].as<long long>();  // may exceed 2^31 on an OEM key
+    portENTER_CRITICAL(&s_creditMux);                    // s_credit + s_license written together
+    s_credit = credit;
+    strlcpy(s_license, data["license_type"] | "", sizeof(s_license));
+    portEXIT_CRITICAL(&s_creditMux);
+    s_creditAt = nowMs;   // arm the throttle only after a real balance read
+    s_force429 = false;   // the forced re-check completed successfully
+    // The balance is authoritative: a 429 was credits-exhaustion only if the account truly reads 0
+    // (otherwise it was a transient rate-limit and we must NOT show the out-of-credits screen).
+    s_exhausted = (credit == 0);
+}
+
+long long VulnersClient::creditsRemaining() const {
+    portENTER_CRITICAL(&s_creditMux);
+    long long c = s_credit;
+    portEXIT_CRITICAL(&s_creditMux);
+    return c;
+}
+bool VulnersClient::creditsKnown() const { return creditsRemaining() >= 0; }  // -1 = never fetched
+bool VulnersClient::creditsExhausted() const { return s_exhausted; }
+String VulnersClient::licenseType() const {
+    char buf[sizeof(s_license)];
+    portENTER_CRITICAL(&s_creditMux);
+    memcpy(buf, s_license, sizeof(buf));  // read under the same lock as the write (consistent discipline)
+    portEXIT_CRITICAL(&s_creditMux);
+    buf[sizeof(buf) - 1] = '\0';
+    return String(buf);
 }

@@ -23,6 +23,8 @@ enum UiScreen {
     SCR_RESET_CONFIRM,  // "Are you sure?" gate before a full factory wipe
     SCR_UPDATE,         // firmware update: offer (now/later) then download progress
     SCR_UPDATE_FAILED,  // shown at boot after a failed update was rolled back
+    SCR_CHILL,          // lofi idle "chill mode": a cat at a computer, sea + sailboat out the window
+    SCR_NOCREDITS,      // Vulners API credits exhausted -> wait for the monthly reset or upgrade the plan
 };
 
 // Events surfaced by poll() for main to act on.
@@ -55,6 +57,9 @@ struct UiStatus {
     String timeStr;        // "14:07"
     int battPct = 82;
     bool charging = true;
+    long long apiCredits = -1;    // remaining Vulners API credits (-1 = unknown / not yet fetched)
+    bool creditsKnown = false;    // a successful apiKey/info fetch has populated apiCredits
+    String licenseType;           // Vulners plan: "free"/"basic"/"pro"/"oem"/"" (for the out-of-credits screen)
 };
 
 class Ui {
@@ -78,6 +83,9 @@ public:
     void showErasing();       // brief "Erasing…" ack drawn just before the reboot
     void showUpdate();        // firmware-update screen (reads updater: offer, or download progress)
     void showUpdateFailed();  // post-rollback screen: the update didn't start, previous version restored
+    void showChill();         // lofi "chill mode" screensaver — cat at a computer, sea + sailboat window
+    void showNoCredits();     // Vulners API credits exhausted: wait for the monthly reset or upgrade
+    void animateChill();      // advance the looping cells (CVE-feed scroll + drifting sailboat)
     void showInterval(const String &channelId);      // per-source update-interval picker
     void enterTimezone();                            // open the picker scrolled to the current zone
     void showTimezone();                             // timezone picker (renders at the current _tzScroll)
@@ -124,6 +132,8 @@ private:
     UiScreen _scr = SCR_BOOT;
     bool _touchOnline = false;
     uint32_t _nextTouch = 0;
+    uint8_t _logoTaps = 0;     // consecutive quick taps on the Vulners logo -> 5 launches chill mode
+    uint32_t _logoTapMs = 0;   // millis() of the last logo tap (resets the run if too slow)
     bool _fingerDown = false;   // GT911 reports continuously while held; act on the press edge only
     int _lastDocIdx = 0;
     // What the last dashboard render actually drew, so a tap on an empty featured/feed slot is ignored
@@ -150,6 +160,30 @@ private:
     String _needKeyIp;
     uint8_t _needKeyPhase = 0;
     void drawNeedKeySpinner();  // the rotating "listening" comet (partial-update cell)
+
+    // Chill-mode (lofi screensaver) animation state.
+    uint16_t _chillTick = 0;   // frame counter
+    int _lastClockMin = -1;    // last displayed wall-clock minute (-1 = unset) -> whole-minute refresh
+    int _boatX = 0;            // sailboat x inside the window (drifts right, then wraps off-screen)
+    bool _gullUp = false;      // seagull wing phase (toggled to flap the wings)
+    int _tailPose = 0;         // cat tail-flick frame (its own timer)
+    int _headPose = 0;         // cat head-turn frame (its own timer — independent of the tail)
+    int _feedTop = 0;          // index of the top CVE row shown on the monitor (scrolls)
+    std::vector<String> _chillIds, _chillScores;  // the monitor's feed: real CVEs (demo fallback)
+    void buildChillFeed();     // snapshot real CVEs from the channels for the monitor (called on entry)
+    void drawCatAtDesk();      // the black-cat silhouette at the keyboard
+    void drawChillMonitor();   // the monitor + its scrolling CVE feed (partial cell)
+    void drawChillWindow();    // the window: sea + drifting sailboat (partial cell)
+    void drawChillCaption();   // the "now watching <CVE>" banner (tracks the highlighted row)
+    void drawBrickWall(int x, int y, int w, int h);  // the room wall (flat + soft mortar)
+    void drawStringLights();   // fairy lights draped across the top of the room
+    void drawFramedArt(int x, int y);                // a small framed picture on the wall
+    void drawMugSteam(int x, int baseY);             // coffee mug + rising steam wisps
+    void drawDeskPlant(int x, int baseY);            // a small potted plant on the desk
+    void drawContactShadow(int cx, int baseY, int rw);  // soft dithered shadow grounding an object
+    void drawWallClock(int cx, int cy, int r, int hour, int minute);  // round wall clock, real hands
+    void drawShelf(int x, int y, int w);             // a floating shelf lined with books
+    void drawHangingPlant(int x, int topY, int dropH);  // a hanging pot with trailing vines
 
     // Document detail state.
     String _docId;

@@ -43,10 +43,20 @@ void clear(uint8_t color = PAPER);
 // Primitives (draw into the framebuffer).
 void fillRect(int x, int y, int w, int h, uint8_t color);
 void blit(int x, int y, int w, int h, const uint8_t *data);  // 4bpp image into fb (x even)
+void blitMask(int x, int y, int w, int h, const uint8_t *data);  // 4bpp sprite; nibble 0x0 = transparent
 void rect(int x, int y, int w, int h, int thick, uint8_t color);  // border, inset inward
 void hline(int x, int y, int w, uint8_t color, int thick = 1);
 void vline(int x, int y, int h, uint8_t color, int thick = 1);
 void line(int x0, int y0, int x1, int y1, uint8_t color);
+void setPx(int x, int y, uint8_t color);  // plot one pixel (nibble write), bounds-checked
+
+// Ordered (Bayer 4x4) dithering — mix two tokens per pixel to fake the midtones the 2-bit panel
+// can't render directly (the real display collapses our 16 tokens to 4 levels). `mix` = 0..16 =
+// how many of every 16 pixels take colB (0 = all colA .. 16 = all colB). Deterministic, so a
+// redrawn-identical region diffs clean against the shadow (no spurious partial-update).
+void ditherRect(int x, int y, int w, int h, uint8_t colA, uint8_t colB, int mix);
+// Vertical dithered gradient from colTop (at y) to colBottom (at y+h-1) — sky/fog/sea atmosphere.
+void vGradient(int x, int y, int w, int h, uint8_t colTop, uint8_t colBottom);
 
 // Text. y is the BASELINE. Returns the advance width. `bg` <0 = transparent.
 int text(const GFXfont &font, int x, int yBaseline, const char *s, uint8_t fg = INK,
@@ -100,6 +110,12 @@ enum RepaintMode {
 };
 void present();                 // show the framebuffer (flash-free 2-bit partial of the changed rows)
 void commitFull();              // FastEPD full update + reset shadow (the one flash)
+void requestFullNext();         // make the NEXT present() a clean full refresh (e.g. leaving a scene)
+// --- smart-animation engine (research-verified: 2BPP partialUpdate is per-pixel + flash-free, so a
+//     stable background + white-edged sprites gives ghost-free, neighbour-safe motion) ---------------
+void setAutoDeghost(bool on);   // chill mode: suppress the periodic whole-screen de-ghost (no flash)
+void savePlate();               // snapshot the framebuffer as the static "plate" backdrop (PSRAM)
+void restoreRect(int x, int y, int w, int h);  // memcpy the plate back over a box (erase a sprite cleanly)
 // Register a FreeRTOS task (TaskHandle_t as void*) that is SUSPENDED for the duration of each
 // e-paper panel transfer and resumed after. The FastEPD i80 LCD transfer is timing-sensitive;
 // heavy concurrent work on the network task (TLS + JSON parsing in PSRAM) can starve its DMA and
