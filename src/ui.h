@@ -40,6 +40,7 @@ enum UiEvent {
     EV_FACTORY_RESET,  // reset-confirm ERASE tapped — main wipes all storage + reboots
     EV_UPDATE_NOW,     // update offer — "Update now": start download+install
     EV_UPDATE_LATER,   // update offer — "Try again tomorrow": snooze ~24h
+    EV_CHECK_UPDATE,   // Settings "Check for updates" — force a discovery + open the update screen
 };
 
 // Live status pulled into the status bar / screens.
@@ -82,6 +83,7 @@ public:
     void showResetConfirm();  // full-frame "Are you sure?" gate before a factory wipe
     void showErasing();       // brief "Erasing…" ack drawn just before the reboot
     void showUpdate();        // firmware-update screen (reads updater: offer, or download progress)
+    void showUpdateCheck();   // enter the update screen in manual "Checking for updates…" mode
     void showUpdateFailed();  // post-rollback screen: the update didn't start, previous version restored
     void showChill();         // lofi "chill mode" screensaver — cat at a computer, sea + sailboat window
     void showNoCredits();     // Vulners API credits exhausted: wait for the monthly reset or upgrade
@@ -160,6 +162,7 @@ private:
     String _needKeyIp;
     uint8_t _needKeyPhase = 0;
     void drawNeedKeySpinner();  // the rotating "listening" comet (partial-update cell)
+    uint32_t _updateCheckMs = 0;  // millis() a manual "check for updates" began (0 = not a manual check)
 
     // Chill-mode (lofi screensaver) animation state.
     uint16_t _chillTick = 0;   // frame counter

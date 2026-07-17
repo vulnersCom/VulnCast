@@ -1131,6 +1131,8 @@ void Ui::showSettings() {
     fillRect(0, H - 44, W, 44, INK);
     rect(22, H - 36, 176, 28, 2, WHITE);
     textAlign(JB_B16, 22, H - 15, 176, C, "RESET DEVICE", WHITE, INK);
+    rect(366, H - 36, 228, 28, 2, WHITE);  // CHECK FOR UPDATES — centered in the footer
+    textAlign(JB_B16, 366, H - 15, 228, C, "CHECK FOR UPDATES", WHITE, INK);
     int snw = textW(JB_R16, "Saved to device storage (NVS)");
     text(JB_R16, W - 22 - snw, H - 16, "Saved to device storage (NVS)", GRAY4, INK);
     presentScreen();
@@ -1186,7 +1188,9 @@ void Ui::showUpdate() {
     text(JB_B22, 54, 37, "FIRMWARE UPDATE", WHITE, INK);
 
     Updater::Phase ph = updater.phase();
+    bool checking = (ph == Updater::CHECKING) || updater.checkPending();
     if (ph == Updater::AVAILABLE) {
+        _updateCheckMs = 0;  // resolved
         text(JB_X36, 28, 138, "Update available", INK);
         String vers = "v" + updater.currentVersion() + "   ->   v" + updater.availableVersion();
         text(JB_X34, 28, 204, vers.c_str(), INK);
@@ -1201,11 +1205,34 @@ void Ui::showUpdate() {
         textAlign(JB_B24, 60, 454, 380, C, "Update now", PAPER, INK);
         rect(520, 402, 380, 82, 2, INK);
         textAlign(JB_B20, 520, 454, 380, C, "Try again tomorrow", INK);
+    } else if (checking) {  // manual "check for updates" in flight (or offline/timed-out)
+        bool stuck = _updateCheckMs &&
+                     (WiFi.status() != WL_CONNECTED ||
+                      (uint32_t)(millis() - _updateCheckMs) > 15000);
+        if (stuck) {
+            text(JB_X36, 28, 170, "Couldn\x27t check", INK);
+            text(JB_M20, 28, 224, "We couldn\x27t reach the update server. Check your", INK2);
+            text(JB_M20, 28, 252, "Wi-Fi connection and try again.", INK2);
+            rect(28, 322, 300, 70, 2, INK);
+            textAlign(JB_B20, 28, 365, 300, C, "Back", INK);
+        } else {
+            text(JB_X36, 28, 170, "Checking for updates\xE2\x80\xA6", INK);
+            String on = "You\x27re on v" + updater.currentVersion();
+            text(JB_R19, 28, 220, on.c_str(), GRAY3);
+        }
     } else if (ph == Updater::FAILED) {
+        _updateCheckMs = 0;
         text(JB_X36, 28, 170, "Update failed", INK);
         text(JB_R19, 28, 214, updater.error(), GRAY3);
         rect(28, 262, 300, 70, 2, INK);
         textAlign(JB_B20, 28, 305, 300, C, "Back", INK);
+    } else if (_updateCheckMs) {  // manual check finished, phase IDLE -> already the latest
+        text(JB_X36, 28, 170, "You\x27re up to date", INK);
+        String sub = "VulnCast v" + updater.currentVersion() + " is the latest version.";
+        text(JB_M20, 28, 224, sub.c_str(), INK2);
+        text(JB_R19, 28, 268, "We also check automatically once an hour.", GRAY3);
+        rect(28, 322, 300, 70, 2, INK);
+        textAlign(JB_B20, 28, 365, 300, C, "Back", INK);
     } else {  // DOWNLOADING / VERIFYING / INSTALLING / DONE — progress slider, no touch actions
         const char *label = ph == Updater::DOWNLOADING ? "Downloading update\xE2\x80\xA6"
                             : ph == Updater::VERIFYING  ? "Verifying signature\xE2\x80\xA6"
@@ -1221,6 +1248,14 @@ void Ui::showUpdate() {
         text(JB_R17, 28, 470, foot.c_str(), GRAY4);
     }
     presentScreen();
+}
+
+// Enter the update screen in manual-check mode: mark the start time (so IDLE reads as "up to date" and
+// a stuck check reads as "couldn't reach"), then draw. Caller has already requested the discovery.
+void Ui::showUpdateCheck() {
+    _updateCheckMs = millis();
+    if (_updateCheckMs == 0) _updateCheckMs = 1;  // 0 is the "not a manual check" sentinel
+    showUpdate();
 }
 
 // Post-rollback screen (shown at boot after a failed update was reverted). Reassuring: nothing lost.
@@ -1536,6 +1571,7 @@ UiEvent Ui::poll() {
         if (backHit) return EV_BACK;
         if (x >= 824 && y >= 432 && y <= 496) { enterTimezone(); return EV_NONE; }
         if (x >= 12 && x <= 210 && y >= 496 && y <= 540) { showResetConfirm(); return EV_NONE; }  // RESET DEVICE (footer, isolated)
+        if (x >= 358 && x <= 602 && y >= 496 && y <= 540) return EV_CHECK_UPDATE;  // CHECK FOR UPDATES (footer, center)
         // Wi-Fi list: ▲/▼ rail (when >3), then the 3 visible rows -> open that network's password
         std::vector<WifiNet> nets = wifiManager.networks();
         const int wtotal = (int)nets.size(), wmax = max(0, wtotal - WIFI_VIS);
@@ -1587,11 +1623,19 @@ UiEvent Ui::poll() {
 
     if (_scr == SCR_UPDATE) {
         Updater::Phase ph = updater.phase();
+        bool checking = (ph == Updater::CHECKING) || updater.checkPending();
         if (ph == Updater::AVAILABLE) {
             if (x >= 60 && x <= 440 && y >= 402 && y <= 484) return EV_UPDATE_NOW;    // Update now
             if (x >= 520 && x <= 900 && y >= 402 && y <= 484) return EV_UPDATE_LATER;  // Try again tomorrow
         } else if (ph == Updater::FAILED) {
-            if (x >= 28 && x <= 328 && y >= 262 && y <= 332) return EV_BACK;  // Back (next tick re-discovers)
+            if (x >= 28 && x <= 328 && y >= 262 && y <= 332) { _updateCheckMs = 0; return EV_BACK; }  // Back
+        } else if (checking) {
+            // "Checking…" itself has no action; its stuck/offline variant ("Couldn't check") shows a Back.
+            bool stuck = _updateCheckMs && (WiFi.status() != WL_CONNECTED ||
+                                            (uint32_t)(millis() - _updateCheckMs) > 15000);
+            if (stuck && x >= 28 && x <= 328 && y >= 322 && y <= 392) { _updateCheckMs = 0; return EV_BACK; }
+        } else if (_updateCheckMs) {  // "You're up to date" -> Back
+            if (x >= 28 && x <= 328 && y >= 322 && y <= 392) { _updateCheckMs = 0; return EV_BACK; }
         }
         return EV_NONE;  // during download/install: no touch actions (a flash write can't be safely cancelled)
     }

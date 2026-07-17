@@ -45,15 +45,21 @@ stop refreshing notifications, mail, and JSON for vulnerability alerts. It watch
 - 🧬 **Human-first document view.** CVSS decoded into exploitability icons + C/I/A impact bars, CWE /
   CISA-KEV chips, an **exploit count**, a scrollable summary, and a scannable QR deep-link — the layout
   adapts per record type (CVE vs exploit vs advisory).
-- 🖥️ **9-screen touch UI.** Dashboard, document, settings, on-screen keyboard, refresh-interval and
-  time-zone pickers — GT911 capacitive touch, saved to NVS.
+- 🖥️ **Touch UI.** Dashboard, document, settings, on-screen keyboard, refresh-interval and time-zone
+  pickers, plus firmware-update and out-of-credits screens — GT911 capacitive touch, saved to NVS.
+- 😌 **Chill mode.** A lofi grayscale screensaver — a cat at a desk reading the live CVE feed, a
+  drifting sailboat out a seaside window, and real-time clocks — kept flash-free on e-paper. Tap the
+  Vulners logo five times to enter; one tap to leave.
+- 🪙 **API credits, in view.** Your remaining Vulners API credits sit in the dashboard footer, with a
+  full-screen heads-up (and a QR to upgrade) the moment they run out.
 - 📶 **Zero-config Wi-Fi.** WPA2/WPA3, multi-network store, captive-portal provisioning, and a runtime
   fallback to the setup AP if the network disappears.
 - 🎞️ **Flash-free e-paper.** A damage-tracking compositor repaints only the changed rows (2-bit partial
   update) — no full-screen blink on every tick.
-- 🔄 **Signed over-the-air updates.** Checks GitHub hourly, verifies an **Ed25519 signature** on the
-  release manifest, installs on your confirmation, and **rolls back automatically** if the new build
-  doesn't boot cleanly. Plus a **factory-reset** button that wipes the device back to out-of-box state.
+- 🔄 **Signed over-the-air updates.** Checks GitHub hourly — or on demand from **Settings → Check for
+  updates** — verifies an **Ed25519 signature** on the release manifest, installs on your confirmation,
+  and **rolls back automatically** if the new build doesn't boot cleanly. Plus a **factory-reset**
+  button that wipes the device back to out-of-box state.
 
 ---
 
@@ -75,6 +81,9 @@ stop refreshing notifications, mail, and JSON for vulnerability alerts. It watch
   <tr>
     <td align="center"><img src="images/setup.png" width="380"><br><sub><b>Captive-portal setup</b></sub></td>
     <td align="center"><img src="images/connecting.png" width="380"><br><sub><b>Connecting</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="images/chill.png" width="640"><br><sub><b>Chill mode</b> — a lofi screensaver: a cat reading the live CVE feed, a seaside window, real-time clocks (tap the Vulners logo 5×)</sub></td>
   </tr>
 </table>
 
@@ -187,7 +196,7 @@ python tools/console.py reboot
 
 | Path | What |
 |------|------|
-| `src/` | Firmware: orchestration, 9-screen UI + touch, drawing toolkit, Vulners client, channels, Wi-Fi, timekeeper, config, web UI. |
+| `src/` | Firmware: orchestration, touch UI + chill-mode screensaver, drawing toolkit, Vulners client, channels, Wi-Fi, timekeeper, config, updater, web UI. |
 | `boards/T5-ePaper-S3.json` | Board definition (vendored from LilyGo) for the exact V2.4 module. |
 | `scripts/gen_secrets.py` | Pre-build hook: generates `include/secrets.h` from `secrets.yaml`. |
 | `tools/` | Host tooling: serial console, framebuffer dump, font/asset generation. |

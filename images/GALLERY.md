@@ -56,3 +56,9 @@ Per-channel update cadence, chosen from presets.
 ## Time-zone picker
 ![Time zone](timezone.png)
 Linux-installer-style scrollable IANA zone list with UTC offsets; time syncs over NTP.
+
+## Chill mode
+![Chill mode](chill.png)
+A lofi grayscale screensaver: a dithered cat at a desk reading the live CVE feed, a Bermuda sloop
+drifting past a seaside window, and real-time clocks — all ghost-free on 2-bit e-paper. Tap the Vulners
+logo five times to enter, one tap to leave.

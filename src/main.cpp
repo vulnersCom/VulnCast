@@ -556,8 +556,12 @@ void loop() {
         static Updater::Phase s_ph = Updater::IDLE;
         static uint8_t s_pct = 255;
         static uint32_t s_drawn = 0;
-        if (ph >= Updater::DOWNLOADING &&
-            (ph != s_ph || (updater.percent() != s_pct && millis() - s_drawn > 700))) {
+        bool checking = (ph == Updater::CHECKING) || updater.checkPending();
+        bool progress = ph >= Updater::DOWNLOADING &&
+                        (updater.percent() != s_pct && millis() - s_drawn > 700);
+        // Repaint on any phase change (Checking -> Available / up-to-date), on download progress, and
+        // periodically while checking so the offline/timed-out "Couldn't check" state can surface.
+        if (ph != s_ph || progress || (checking && millis() - s_drawn > 1000)) {
             s_ph = ph;
             s_pct = updater.percent();
             s_drawn = millis();
@@ -681,6 +685,11 @@ void loop() {
             g_updateShownVer = "";  // let the offer re-appear after the snooze expires (snoozed() blocks
             pushChannelsToUi();     // discovery meanwhile, so this can't immediately re-navigate)
             enterDashboard();
+            break;
+        case EV_CHECK_UPDATE:  // Settings "Check for updates" -> force discovery + open the update screen
+            updater.requestCheck();
+            triggerFetch();        // wake the fetch task so the check runs now (off the UI loop)
+            ui.showUpdateCheck();  // "Checking…"; the loop() SCR_UPDATE block repaints as the phase resolves
             break;
         default:
             break;

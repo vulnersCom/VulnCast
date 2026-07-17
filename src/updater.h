@@ -49,6 +49,7 @@ public:
     // buffers written on the fetch task and read here — a torn read yields stale text, never a crash.
     Phase phase() const { return _phase; }
     bool available() const { return _phase == AVAILABLE; }
+    bool checkPending() const { return _forceCheck; }  // a forced discovery is queued but hasn't run yet
     String currentVersion() const { return String(VULNCAST_FW_VERSION); }
     String availableVersion() const { return String(_newVer); }
     uint32_t availableSize() const { return _size; }
