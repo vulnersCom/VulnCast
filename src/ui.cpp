@@ -18,6 +18,7 @@
 #include "fonts/jbfonts.h"
 #include "gfx.h"
 #include "timekeeper.h"
+#include "updater.h"
 #include "wifi_manager.h"
 
 using namespace gfx;
@@ -407,11 +408,12 @@ bool Ui::readTouch(int &x, int &y) {
 }
 
 namespace {
-const char *kScrNames[] = {"boot",     "connecting", "setup",    "dashboard", "document",
-                           "settings", "keyboard",   "interval", "timezone", "needkey"};
+const char *kScrNames[] = {"boot",     "connecting", "setup",    "dashboard", "document", "settings",
+                           "keyboard", "interval",   "timezone", "needkey",   "reset?",   "update",
+                           "updfail"};
 }  // namespace
 
-const char *Ui::screenName() const { return _scr <= SCR_NEEDKEY ? kScrNames[_scr] : "?"; }
+const char *Ui::screenName() const { return _scr <= SCR_UPDATE_FAILED ? kScrNames[_scr] : "?"; }
 
 void Ui::requestJump(char c) { _pendingJump = c; }  // queued by the console task
 void Ui::requestTest(int n) { _pendingTest = n; }
@@ -501,6 +503,9 @@ void Ui::serviceJump() {
         case '8': showConnecting("OFFICE-2.4G", 2); break;
         case '9': showSetup("VulnCast-Setup", "vulncast-setup", "192.168.4.1", 0); break;
         case 'K': showNeedKey("192.168.1.42"); break;  // preview the "add your API key" screen
+        case 'Y': showResetConfirm(); break;           // preview the factory-reset confirm gate
+        case 'U': updater.devPreviewAvailable(); showUpdate(); break;  // preview the update offer
+        case 'B': updater.devPreviewRollback(); showUpdateFailed(); break;  // preview the rollback screen
     }
 }
 
@@ -844,8 +849,8 @@ void Ui::renderDashboard(const UiStatus &st) {
     // FOOTER — the tab bar conveys position, so just a hint + the champion's published date.
     // Reuse the champion already snapshotted above (`champ`/`have`) — no second deep copy.
     String pub = have ? champ.published.substring(0, 10) : String();
-    drawFooter("Swipe or tap the edges to change channel",
-               pub.length() ? (String("Published ") + pub).c_str() : nullptr);
+    drawFooter("", pub.length() ? (String("Published ") + pub).c_str() : nullptr);
+    text(JB_B20, 22, H - 14, "v" VULNCAST_FW_VERSION, WHITE, INK);  // firmware version, bold/bright
 }
 
 // Content changes (screen entry, channel rotation, fresh data) do a full 16-gray
@@ -1093,7 +1098,120 @@ void Ui::showSettings() {
     rect(824, 443, 112, 43, 2, INK);
     text(JB_B17, 838, 470, "CHANGE", INK);
     gTriRight(915, 458, 12, INK);
-    drawFooter("Saved to device storage (NVS)", nullptr);
+    // Footer: RESET DEVICE deliberately parked in the far bottom-left — isolated from every other
+    // control (nearest tappable is ~130px above) so it can't be fat-fingered; the confirm gate is the
+    // real safety, this is the belt.
+    fillRect(0, H - 44, W, 44, INK);
+    rect(22, H - 36, 176, 28, 2, WHITE);
+    textAlign(JB_B16, 22, H - 15, 176, C, "RESET DEVICE", WHITE, INK);
+    int snw = textW(JB_R16, "Saved to device storage (NVS)");
+    text(JB_R16, W - 22 - snw, H - 16, "Saved to device storage (NVS)", GRAY4, INK);
+    presentScreen();
+}
+
+// ---- factory-reset confirm -------------------------------------------------
+
+// Full-frame "Are you sure?" gate before wiping the device. Reached from the Settings RESET button
+// (or dev-jump 'Y'). BACK/Cancel returns to Settings; ERASE emits EV_FACTORY_RESET to main.
+void Ui::showResetConfirm() {
+    _scr = SCR_RESET_CONFIRM;
+    beginFrame();
+    drawHeaderBar("BACK", "RESET DEVICE", nullptr);
+    text(JB_X36, 28, 138, "Reset this device?", INK);
+    text(JB_M20, 28, 186, "This erases everything and returns the device to", INK2);
+    text(JB_M20, 28, 214, "its out-of-box state:", INK2);
+    // Spell out exactly what gets wiped, so the cost is clear before the tap.
+    const char *items[] = {"Saved Wi-Fi networks", "Vulners API key", "Feeds & channels",
+                           "Time zone & cached data"};
+    int ly = 258;
+    for (const char *it : items) {
+        gDot(42, ly - 6, 3, INK);
+        text(JB_R19, 60, ly, it, INK);
+        ly += 34;
+    }
+    text(JB_R17, 28, ly + 10, "You'll set it up again from scratch, like a new device.", GRAY3);
+
+    // Buttons: Cancel (outline, safe default, left) · ERASE EVERYTHING (solid/destructive, right).
+    rect(120, 440, 300, 66, 2, INK);
+    textAlign(JB_B22, 120, 483, 300, C, "Cancel", INK);
+    fillRect(540, 440, 300, 66, INK);
+    textAlign(JB_B20, 540, 483, 300, C, "ERASE EVERYTHING", PAPER, INK);
+    presentScreen();
+}
+
+// Brief ack drawn by main just before ESP.restart(), so the wipe isn't a silent black screen.
+void Ui::showErasing() {
+    beginFrame();
+    textAlign(JB_X36, 0, 280, W, C, "Erasing\xE2\x80\xA6", INK);
+    textAlign(JB_R19, 0, 330, W, C, "Restarting into setup", GRAY3);
+    presentScreen();
+}
+
+// ---- firmware update -------------------------------------------------------
+
+// Reads `updater`. AVAILABLE draws the offer (Update now / Try again tomorrow); the working phases
+// draw a label + progress slider (driven by a throttled loop() block in main reading updater.percent()).
+void Ui::showUpdate() {
+    _scr = SCR_UPDATE;
+    beginFrame();
+    fillRect(0, 0, W, 58, INK);  // distinct "FIRMWARE UPDATE" header (not the settings BACK bar)
+    gTriDown(30, 20, 16, WHITE);
+    text(JB_B22, 54, 37, "FIRMWARE UPDATE", WHITE, INK);
+
+    Updater::Phase ph = updater.phase();
+    if (ph == Updater::AVAILABLE) {
+        text(JB_X36, 28, 138, "Update available", INK);
+        String vers = "v" + updater.currentVersion() + "   ->   v" + updater.availableVersion();
+        text(JB_X34, 28, 204, vers.c_str(), INK);
+        char sub[72];
+        snprintf(sub, sizeof(sub), "~%.1f MB  \xC2\xB7  restarts once  \xC2\xB7  about a minute",
+                 updater.availableSize() / 1048576.0);
+        text(JB_R19, 28, 246, sub, GRAY3);
+        text(JB_M20, 28, 300, "Your Wi-Fi, key and settings are kept. If the new", INK2);
+        text(JB_M20, 28, 328, "version won\x27t start, it rolls back automatically.", INK2);
+        // Update now (solid/primary) · Try again tomorrow (outline).
+        fillRect(60, 402, 380, 82, INK);
+        textAlign(JB_B24, 60, 454, 380, C, "Update now", PAPER, INK);
+        rect(520, 402, 380, 82, 2, INK);
+        textAlign(JB_B20, 520, 454, 380, C, "Try again tomorrow", INK);
+    } else if (ph == Updater::FAILED) {
+        text(JB_X36, 28, 170, "Update failed", INK);
+        text(JB_R19, 28, 214, updater.error(), GRAY3);
+        rect(28, 262, 300, 70, 2, INK);
+        textAlign(JB_B20, 28, 305, 300, C, "Back", INK);
+    } else {  // DOWNLOADING / VERIFYING / INSTALLING / DONE — progress slider, no touch actions
+        const char *label = ph == Updater::DOWNLOADING ? "Downloading update\xE2\x80\xA6"
+                            : ph == Updater::VERIFYING  ? "Verifying signature\xE2\x80\xA6"
+                            : ph == Updater::INSTALLING ? "Installing\xE2\x80\xA6"
+                            : ph == Updater::DONE       ? "Done \xE2\x80\x94 restarting\xE2\x80\xA6"
+                                                        : "Working\xE2\x80\xA6";
+        text(JB_X36, 28, 170, label, INK);
+        progressBar(28, 240, 904, 44, updater.percent() / 100.0f, INK);
+        char pct[48];
+        snprintf(pct, sizeof(pct), "%u%%   \xC2\xB7   do not unplug", updater.percent());
+        text(JB_R19, 28, 320, pct, GRAY3);
+        String foot = "v" + updater.currentVersion() + " -> v" + updater.availableVersion();
+        text(JB_R17, 28, 470, foot.c_str(), GRAY4);
+    }
+    presentScreen();
+}
+
+// Post-rollback screen (shown at boot after a failed update was reverted). Reassuring: nothing lost.
+void Ui::showUpdateFailed() {
+    _scr = SCR_UPDATE_FAILED;
+    beginFrame();
+    fillRect(0, 0, W, 58, INK);
+    text(JB_B22, 30, 37, "UPDATE FAILED", WHITE, INK);
+    text(JB_X36, 28, 148, "Update didn\x27t take", INK);
+    String pv = updater.pendingVersion();
+    String l1 = (pv.length() ? ("v" + pv) : String("The new version")) + " wouldn\x27t start, so the";
+    text(JB_M20, 28, 200, l1.c_str(), INK2);
+    text(JB_M20, 28, 228, "device restored your previous version. Nothing was lost.", INK2);
+    String run = "Now running v" + updater.currentVersion();
+    text(JB_X34, 28, 302, run.c_str(), INK);
+    text(JB_R19, 28, 346, "It won\x27t retry this version automatically.", GRAY3);
+    fillRect(60, 420, 300, 76, INK);
+    textAlign(JB_B22, 60, 468, 300, C, "OK", PAPER, INK);
     presentScreen();
 }
 
@@ -1340,6 +1458,7 @@ UiEvent Ui::poll() {
     if (_scr == SCR_SETTINGS) {
         if (backHit) return EV_BACK;
         if (x >= 824 && y >= 432 && y <= 496) { enterTimezone(); return EV_NONE; }
+        if (x >= 12 && x <= 210 && y >= 496 && y <= 540) { showResetConfirm(); return EV_NONE; }  // RESET DEVICE (footer, isolated)
         // Wi-Fi list: ▲/▼ rail (when >3), then the 3 visible rows -> open that network's password
         std::vector<WifiNet> nets = wifiManager.networks();
         const int wtotal = (int)nets.size(), wmax = max(0, wtotal - WIFI_VIS);
@@ -1379,6 +1498,30 @@ UiEvent Ui::poll() {
                 return EV_NONE;
             }
         }
+        return EV_NONE;
+    }
+
+    if (_scr == SCR_RESET_CONFIRM) {
+        if (backHit) { showSettings(); return EV_NONE; }                                    // BACK = cancel
+        if (x >= 120 && x <= 420 && y >= 440 && y <= 506) { showSettings(); return EV_NONE; }  // Cancel
+        if (x >= 540 && x <= 840 && y >= 440 && y <= 506) return EV_FACTORY_RESET;             // ERASE
+        return EV_NONE;
+    }
+
+    if (_scr == SCR_UPDATE) {
+        Updater::Phase ph = updater.phase();
+        if (ph == Updater::AVAILABLE) {
+            if (x >= 60 && x <= 440 && y >= 402 && y <= 484) return EV_UPDATE_NOW;    // Update now
+            if (x >= 520 && x <= 900 && y >= 402 && y <= 484) return EV_UPDATE_LATER;  // Try again tomorrow
+        } else if (ph == Updater::FAILED) {
+            if (x >= 28 && x <= 328 && y >= 262 && y <= 332) return EV_BACK;  // Back (next tick re-discovers)
+        }
+        return EV_NONE;  // during download/install: no touch actions (a flash write can't be safely cancelled)
+    }
+
+    if (_scr == SCR_UPDATE_FAILED) {
+        if (backHit) return EV_BACK;
+        if (x >= 60 && x <= 360 && y >= 420 && y <= 496) return EV_BACK;  // OK -> dashboard
         return EV_NONE;
     }
 

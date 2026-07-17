@@ -103,6 +103,10 @@ public:
                 uint32_t refreshSec, bool active, bool manual, String &err);
     bool remove(const String &id, String &err);
 
+    // Factory reset: delete persisted channels + cached feed data. On the next boot begin() finds no
+    // config file and re-seeds the default channels. Caller reboots afterwards.
+    void factoryReset();
+
 private:
     bool serveDetail(VulnersClient &client);  // top-priority on-demand detail fetch (tick helper)
 

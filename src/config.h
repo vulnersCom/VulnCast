@@ -17,6 +17,9 @@ public:
     void setApiKey(const String &key);
     void seedApiKeyIfEmpty(const String &seed);
 
+    // Factory reset: wipe all persisted config (the Vulners API key). Caller reboots afterwards.
+    void factoryReset();
+
 private:
     bool _ready = false;
 };

@@ -92,6 +92,12 @@ void TimeKeeper::onConnected() {
     configTzTime(_tz.c_str(), "pool.ntp.org", "time.nist.gov");
 }
 
+void TimeKeeper::factoryReset() {
+    prefs.clear();   // wipe the "clock" NVS namespace (the saved TZ)
+    _tz = "UTC0";
+    applyTz(_tz);
+}
+
 bool TimeKeeper::synced() const { return now() > kSyncedThreshold; }
 
 time_t TimeKeeper::now() const { return time(nullptr); }

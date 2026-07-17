@@ -34,3 +34,7 @@ void Config::seedApiKeyIfEmpty(const String &seed) {
     if (seed.isEmpty() || seed == "your-vulners-api-key") return;
     prefs.putString("vulnersKey", seed);
 }
+
+void Config::factoryReset() {
+    if (_ready) prefs.clear();  // wipe the "vulncast" NVS namespace (the API key)
+}

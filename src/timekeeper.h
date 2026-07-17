@@ -27,6 +27,7 @@ class TimeKeeper {
 public:
     void begin();        // load TZ from NVS and apply it (SNTP starts on connect)
     void onConnected();  // (re)start SNTP once WiFi is up
+    void factoryReset(); // wipe the persisted timezone -> default UTC0 (caller reboots afterwards)
     bool synced() const; // SNTP has set a plausible wall-clock time
 
     time_t now() const;            // epoch (UTC)

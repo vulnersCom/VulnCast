@@ -165,6 +165,17 @@ void WifiManager::persist() {
     }
 }
 
+void WifiManager::factoryReset() {
+    wprefs.clear();  // wipe the "wifinet" NVS namespace (all saved SSIDs/passwords + fast-reconnect cache)
+    _ssids.clear();
+    _pass.clear();
+    _bootSsid = "";
+    _lastSsid = "";
+    _cacheChannel = 0;
+    _haveCache = false;
+    memset(_cacheBssid, 0, sizeof(_cacheBssid));
+}
+
 void WifiManager::seedIfEmpty(const String &ssid, const String &pass) {
     if (!_ssids.empty()) return;
     if (ssid.isEmpty() || ssid == "your-wifi-ssid") return;

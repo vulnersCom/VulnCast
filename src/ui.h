@@ -20,6 +20,9 @@ enum UiScreen {
     SCR_INTERVAL,
     SCR_TIMEZONE,
     SCR_NEEDKEY,   // connected but no Vulners API key yet -> "enter it via the web interface"
+    SCR_RESET_CONFIRM,  // "Are you sure?" gate before a full factory wipe
+    SCR_UPDATE,         // firmware update: offer (now/later) then download progress
+    SCR_UPDATE_FAILED,  // shown at boot after a failed update was rolled back
 };
 
 // Events surfaced by poll() for main to act on.
@@ -32,6 +35,9 @@ enum UiEvent {
     EV_NEXT_CH,     // swipe/pager next channel
     EV_PREV_CH,     // prev channel
     EV_CONNECT,     // keyboard CONNECT — join kbSsid()/kbBuf()
+    EV_FACTORY_RESET,  // reset-confirm ERASE tapped — main wipes all storage + reboots
+    EV_UPDATE_NOW,     // update offer — "Update now": start download+install
+    EV_UPDATE_LATER,   // update offer — "Try again tomorrow": snooze ~24h
 };
 
 // Live status pulled into the status bar / screens.
@@ -68,6 +74,10 @@ public:
     void showRefreshing();                           // additive "updating" ack in the refresh button
     void showDocument(const String &channelId, int idx);
     void showSettings();
+    void showResetConfirm();  // full-frame "Are you sure?" gate before a factory wipe
+    void showErasing();       // brief "Erasing…" ack drawn just before the reboot
+    void showUpdate();        // firmware-update screen (reads updater: offer, or download progress)
+    void showUpdateFailed();  // post-rollback screen: the update didn't start, previous version restored
     void showInterval(const String &channelId);      // per-source update-interval picker
     void enterTimezone();                            // open the picker scrolled to the current zone
     void showTimezone();                             // timezone picker (renders at the current _tzScroll)

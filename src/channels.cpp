@@ -134,6 +134,12 @@ void Channels::begin() {
     Serial.printf("[chan] %d channels loaded\n", (int)_chans.size());
 }
 
+void Channels::factoryReset() {
+    // Remove both persisted files; next boot re-seeds default channels (empty config -> seedDefaults).
+    LittleFS.remove(kFile);
+    LittleFS.remove(kDataFile);
+}
+
 void Channels::seedDefaults() {
     for (const Seed &s : kSeeds) {
         if (_chans.size() >= (size_t)kMaxChannels) break;

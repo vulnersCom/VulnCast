@@ -30,6 +30,7 @@ public:
     void begin();
     void seedIfEmpty(const String &ssid, const String &pass);
     int savedCount() const { return (int)_ssids.size(); }
+    void factoryReset();  // erase all saved networks + fast-reconnect cache (caller reboots afterwards)
 
     void beginConnectTo(const String &preferSsid);  // non-blocking manual join (keyboard) via the FSM
     // Non-blocking boot connect, driven from loop() on the UI thread (WiFi ops must

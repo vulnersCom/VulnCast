@@ -21,6 +21,7 @@
 #include "secrets.h"
 #include "timekeeper.h"
 #include "ui.h"
+#include "updater.h"
 #include "vulners.h"
 #include "wifi_manager.h"
 
@@ -38,6 +39,7 @@ volatile uint32_t g_loopN = 0;  // UI-loop heartbeat: advances every loop() iter
 uint32_t g_lastDashUpd = 0;   // updatedMs the dashboard was last drawn from
 uint32_t g_refreshBusyUntil = 0;  // manual-refresh "UPDATING" ack shown until data lands or this timeout
 uint32_t g_lastStatusDraw = 0;
+String g_updateShownVer;  // version whose update offer we've already surfaced (don't re-navigate to it)
 
 // Boot AND manual-join Wi-Fi bring-up is NON-BLOCKING and driven from loop() (see wifiManager
 // .beginConnect / beginConnectTo / serviceConnect). A blocking scan+connect on the UI loop froze
@@ -59,8 +61,13 @@ void fetchTask(void *) {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         if (!g_uiReady || WiFi.status() != WL_CONNECTED) continue;
+        if (updater.installPending()) {  // dedicate this wake to the (blocking) download+install; reboots on success
+            updater.serviceInstall();
+            continue;
+        }
         wifiManager.serviceKeyCheck();  // blocking HTTPS validation, off the UI loop
         channels.tick(vulners);
+        updater.tick();                 // self-throttled hourly update discovery, off the UI loop
     }
 }
 
@@ -102,8 +109,10 @@ void consoleHelp() {
         "  F          force dashboard now (stop boot-connect churn; UI testing w/o wifi)\n"
         "  n / p      next / prev channel (dashboard)\n"
         "  r          refresh the active channel now\n"
-        "  1..9 V     preview a screen: 1 dashboard 2 document 3 settings 4 keyboard\n"
+        "  u          OTA: crypto self-test + force an update-discovery check\n"
+        "  1-9 VKYUB preview a screen: 1 dashboard 2 document 3 settings 4 keyboard\n"
         "             5 interval 6 timezone 7 boot 8 connecting 9 setup V vuln-doc\n"
+        "             K needkey Y reset-confirm U update B update-failed\n"
         "  R          reboot the device\n"
         " REFERENCE\n"
         "  screen ids (s/i): 0 boot 1 connecting 2 setup 3 dashboard 4 document\n"
@@ -202,10 +211,34 @@ void consoleDispatch(char c) {
             requestActiveRefresh();
             Serial.println(F("[refresh] queued fetch for active channel"));
             break;
+        case 'u':  // OTA: crypto self-test + force an update-discovery check now (off the UI loop)
+            updater.selfTest();
+            updater.requestCheck();
+            triggerFetch();
+            Serial.println(F("[ota] self-test done; forced discovery queued (watch for [ota] lines)"));
+            break;
+#ifdef VULNCAST_OTA_TEST
+        case 'I': {  // TEST: install from a URL over insecure TLS — "I <url> <sha256hex> <size>"
+            String line = Serial.readStringUntil('\n');
+            line.trim();
+            int a = line.indexOf(' '), b = line.indexOf(' ', a + 1);
+            if (a > 0 && b > a) {
+                updater.testInstall(line.substring(0, a), line.substring(a + 1, b),
+                                    (uint32_t)line.substring(b + 1).toInt());
+                triggerFetch();
+            } else {
+                Serial.println(F("[ota] usage: I <url> <sha256hex> <size>"));
+            }
+            break;
+        }
+        case 'O':  // TEST: force a rollback (simulate a failed health verification)
+            updater.rollbackAndReboot();
+            break;
+#endif
         case 'n': ui.injectTouch(925, 174); Serial.println(F("[ch] next")); break;  // ▸ pager
         case 'p': ui.injectTouch(35, 174); Serial.println(F("[ch] prev")); break;   // ◂ pager
-        case '1': case '2': case '3': case '4': case '5':
-        case '6': case '7': case '8': case '9': case 'V': case 'K':
+        case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+        case 'V': case 'K': case 'Y': case 'U': case 'B':
             ui.requestJump(c);  // drawing happens on the UI loop
             Serial.printf("[jump] %c queued\n", c);
             break;
@@ -319,6 +352,21 @@ void onConnected() {
     triggerFetch();
 }
 
+// Full factory wipe (from the Settings RESET -> confirm flow). Erases every persisted store, then
+// reboots — on the next boot the compiled seeds apply (empty on a release build -> the setup AP),
+// so the device comes up exactly like a new unit. Runs on the UI loop (poll -> EV_FACTORY_RESET).
+void factoryReset() {
+    Serial.println(F("[reset] factory reset requested — wiping all storage, rebooting into setup"));
+    ui.showErasing();          // brief on-panel ack before the reboot
+    config.factoryReset();     // NVS "vulncast"  (Vulners API key)
+    wifiManager.factoryReset();// NVS "wifinet"   (saved networks + fast-reconnect cache)
+    timeKeeper.factoryReset(); // NVS "clock"     (timezone)
+    channels.factoryReset();   // LittleFS        (/channels.json + /feeds.json)
+    updater.factoryReset();    // NVS "ota"       (snooze / skip / pending-version state)
+    delay(600);                // let the ack render + NVS commits settle
+    ESP.restart();
+}
+
 }  // namespace
 
 void setup() {
@@ -339,6 +387,7 @@ void setup() {
     config.seedApiKeyIfEmpty(VULNERS_API_KEY);
     channels.begin();
     timeKeeper.begin();
+    updater.begin();  // opens NVS "ota"; boot verify/rollback detection is wired in a later stage
 
     // Bring Wi-Fi up here (after the framebuffer/stores exist, before the last two boot paints) and
     // kick the NON-BLOCKING connect: WiFi.begin() returns immediately, so the ~2-3s association+DHCP
@@ -436,6 +485,49 @@ void loop() {
                 s_needKeyAnim = millis();
                 ui.animateNeedKey();
             }
+        }
+    }
+
+    // Surface a discovered firmware update: navigate to the offer once per version, only when idle on
+    // the dashboard and outside the read-grace window (never yank the screen mid-read).
+    if (updater.available() && ui.screen() == SCR_DASHBOARD &&
+        updater.availableVersion() != g_updateShownVer && millis() - g_lastNav > kNavGraceMs) {
+        g_updateShownVer = updater.availableVersion();
+        ui.showUpdate();
+    }
+
+    // Fresh-install health check (only ever true right after an OTA): mark the new image valid once it
+    // boots through to a live UI without crashing. We do NOT require live Wi-Fi — a transient outage must
+    // never roll back a good build, and reaching the setup-AP fallback still proves the image runs. A
+    // crash/hang that never reaches a terminal screen fails the deadline -> rollback; a hard boot-loop is
+    // caught by the RTC three-strikes guard in updater.begin().
+    if (updater.verifyPending()) {
+        bool ran = (ui.screen() == SCR_DASHBOARD || ui.screen() == SCR_NEEDKEY || ui.screen() == SCR_SETUP);
+        if (ran) updater.markHealthyIfPending();
+        else if (updater.verifyDeadlinePassed()) updater.rollbackAndReboot();  // does not return
+    }
+
+    // After a rollback, surface the failure screen once, when we reach a steady screen.
+    static bool s_rollbackShown = false;
+    if (!s_rollbackShown && updater.bootWasRollback() &&
+        (ui.screen() == SCR_DASHBOARD || ui.screen() == SCR_NEEDKEY)) {
+        s_rollbackShown = true;
+        ui.showUpdateFailed();
+    }
+
+    // Repaint the update-progress slider as the install advances (throttled to integer-% changes, so
+    // the periodic de-ghost stays rare over the ~1 min download).
+    if (ui.screen() == SCR_UPDATE) {
+        Updater::Phase ph = updater.phase();
+        static Updater::Phase s_ph = Updater::IDLE;
+        static uint8_t s_pct = 255;
+        static uint32_t s_drawn = 0;
+        if (ph >= Updater::DOWNLOADING &&
+            (ph != s_ph || (updater.percent() != s_pct && millis() - s_drawn > 700))) {
+            s_ph = ph;
+            s_pct = updater.percent();
+            s_drawn = millis();
+            ui.showUpdate();
         }
     }
 
@@ -543,6 +635,19 @@ void loop() {
             wifiManager.beginConnectTo(ssid);  // try the just-entered network first, no blocking scan
             break;
         }
+        case EV_FACTORY_RESET:  // reset-confirm ERASE -> wipe everything + reboot into setup
+            factoryReset();
+            break;
+        case EV_UPDATE_NOW:  // update offer accepted -> download + verify + install (shows progress)
+            updater.startInstall();
+            triggerFetch();  // wake the fetch task to begin the install now
+            break;
+        case EV_UPDATE_LATER:  // "Try again tomorrow" -> snooze ~24h and return to the dashboard
+            updater.snoozeOneDay();
+            g_updateShownVer = "";  // let the offer re-appear after the snooze expires (snoozed() blocks
+            pushChannelsToUi();     // discovery meanwhile, so this can't immediately re-navigate)
+            enterDashboard();
+            break;
         default:
             break;
     }

@@ -131,12 +131,18 @@ constexpr const char *kChannelFields[] = {
     "id", "title", "type", "bulletinFamily", "published", "href", "cvss",
     "reporter", "bounty", "bountyState", "aiDescription", "description"};
 
-// Configure a one-shot HTTPS request: insecure TLS (v1 — roadmap: pin the Vulners
-// cert), timeouts, redirect policy, begin(). The single place the setInsecure()
-// decision lives; callers add their own headers/verb afterwards.
+// The default full Mozilla CA bundle embedded in mbedtls (CONFIG_MBEDTLS_CERTIFICATE_BUNDLE, DEFAULT_FULL);
+// covers vulners.com's CA and survives leaf rotation. Same bundle the updater uses for GitHub.
+extern const uint8_t rootca_crt_bundle_start[] asm("_binary_x509_crt_bundle_start");
+extern const uint8_t rootca_crt_bundle_end[] asm("_binary_x509_crt_bundle_end");
+
+// Configure a one-shot HTTPS request: TLS validated against the CA bundle (so the X-Api-Key header
+// can't be captured by a MITM impersonating vulners.com), timeouts, redirect policy, begin(). The
+// single place the TLS decision lives; callers add their own headers/verb afterwards.
 bool configureHttps(WiFiClientSecure &client, HTTPClient &https, const char *url,
                     int readTimeoutMs) {
-    client.setInsecure();
+    client.setCACertBundle(rootca_crt_bundle_start,
+                           (size_t)(rootca_crt_bundle_end - rootca_crt_bundle_start));
     https.setConnectTimeout(8000);
     https.setTimeout(readTimeoutMs);
     https.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);

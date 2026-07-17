@@ -51,6 +51,9 @@ stop refreshing notifications, mail, and JSON for vulnerability alerts. It watch
   fallback to the setup AP if the network disappears.
 - 🎞️ **Flash-free e-paper.** A damage-tracking compositor repaints only the changed rows (2-bit partial
   update) — no full-screen blink on every tick.
+- 🔄 **Signed over-the-air updates.** Checks GitHub hourly, verifies an **Ed25519 signature** on the
+  release manifest, installs on your confirmation, and **rolls back automatically** if the new build
+  doesn't boot cleanly. Plus a **factory-reset** button that wipes the device back to out-of-box state.
 
 ---
 
@@ -98,7 +101,36 @@ stop refreshing notifications, mail, and JSON for vulnerability alerts. It watch
 - **Data:** the Vulners REST API over HTTPS, parsed with ArduinoJson filters using precise dot-notation
   field selection, so even multi-MB documents stay small.
 - **Wi-Fi:** WPA2/WPA3, multi-network NVS store, captive-portal provisioning (`vulncast.local`).
-- **Update:** USB and password-protected OTA (ArduinoOTA).
+- **Update:** USB, password-protected OTA (ArduinoOTA), and signed background auto-update from GitHub
+  with automatic rollback — see [Firmware updates](#-firmware-updates--rollback) below.
+
+## 🔄 Firmware updates & rollback
+
+Every ~hour the device anonymously fetches a small **signed manifest** from GitHub Pages
+(`update.json`: version, image URL, size, SHA-256, and an Ed25519 signature). It verifies the
+signature against a **public key baked into the firmware**, and if a newer version is offered it shows
+an update screen — **Update now** or **Try again tomorrow**. On confirmation it streams the app image,
+checks the SHA-256 against the signed value, and writes it to the spare OTA slot.
+
+The new build then boots in a **pending-verify** state: it must reach a live UI without crashing, or
+the bootloader **rolls back to the previous version automatically** (with an on-device "update failed"
+screen). A three-strikes boot counter backstops a hard wedge. TLS to GitHub is validated against the
+embedded CA bundle, but the Ed25519 signature is the real integrity gate — a compromised CDN, cert, or
+TLS link still cannot ship firmware the device will run. **No credentials are baked in**; the private
+signing key lives only on the release machine.
+
+**Configuration (for forks — override in `platformio.ini` `build_flags`, defaults are secure):**
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `VULNCAST_UPDATE_MANIFEST_URL` | our GitHub Pages `update.json` | Point auto-update at your own host. |
+| `VULNCAST_OTA_REQUIRE_SIGNATURE` | `1` | `0` runs **signature-free** — for a fork that self-hosts updates without managing a signing key (integrity then rests on TLS + the manifest SHA-256). |
+| `VULNCAST_OTA_CHECK_INTERVAL_MS` | `3600000` | How often to check. |
+
+To cut a signed release: build the app image, then
+`python3 scripts/sign_manifest.py --version X.Y.Z --url <asset-url> --bin firmware.bin --out flasher/update.json`
+(the private key is read from `~/.vulncast/`, generated once by `scripts/gen_update_key.py`, and is
+never committed). Publish `update.json` to Pages and the app image as a GitHub Release asset.
 
 ## ⚡ Flash it — no build required
 
