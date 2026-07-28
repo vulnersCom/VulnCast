@@ -183,9 +183,23 @@ bool postJson(const char *url, const String &body, const JsonDocument &filter,
         https.end();
         return false;
     }
-    DeserializationError jsonErr = deserializeJson(
-        out, https.getStream(), DeserializationOption::Filter(filter));
+    // Read the FULL body, then parse — do NOT filter-parse straight off https.getStream(): a mid-parse
+    // 0-byte read on the TLS stream is taken as end-of-document, so ArduinoJson stops after `result` and
+    // silently yields an empty result (total=0) with no error. Responses are field-limited (~10-33 KB),
+    // so a single buffered read is memory-safe; bound it so a surprise-large body can't exhaust the heap.
+    int len = https.getSize();  // Content-Length (-1 if unknown)
+    if (len > 60000) {
+        err = "body too large (" + String(len) + ")";
+        https.end();
+        return false;
+    }
+    String raw = https.getString();
     https.end();
+    if (raw.isEmpty()) {
+        err = "empty body";
+        return false;
+    }
+    DeserializationError jsonErr = deserializeJson(out, raw, DeserializationOption::Filter(filter));
     if (jsonErr) {
         err = String("json: ") + jsonErr.c_str();
         return false;
@@ -237,10 +251,15 @@ bool VulnersClient::searchChannel(const String &query, uint16_t size,
     src["enchantments"]["short_description"] = true;   // AI human summary (all families)
     src["exploits"][0]["type"] = true;                 // keep only a tiny field/element — we just count them
     filter["data"]["total"] = true;
+    filter["data"]["error"] = true;  // surface a Vulners error instead of silently reading total=0
     filter["result"] = true;
 
     JsonDocument doc;
     if (!postJson(kUrlLucene, body, filter, doc, err)) return false;
+    if (String(doc["result"] | "") != "OK") {  // API said error (bad/limited key, bad query, quota…)
+        err = "api: " + String((const char *)(doc["data"]["error"] | "error"));
+        return false;
+    }
 
     if (total != nullptr) *total = doc["data"]["total"] | 0L;
     for (JsonObject hit : doc["data"]["search"].as<JsonArray>()) {
