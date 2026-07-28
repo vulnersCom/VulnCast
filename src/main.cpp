@@ -556,7 +556,7 @@ void loop() {
         static Updater::Phase s_ph = Updater::IDLE;
         static uint8_t s_pct = 255;
         static uint32_t s_drawn = 0;
-        bool checking = (ph == Updater::CHECKING) || updater.checkPending();
+        bool checking = (ph == Updater::CHECKING) || (updater.checkPending() && ph == Updater::IDLE);
         bool progress = ph >= Updater::DOWNLOADING &&
                         (updater.percent() != s_pct && millis() - s_drawn > 700);
         // Repaint on any phase change (Checking -> Available / up-to-date), on download progress, and

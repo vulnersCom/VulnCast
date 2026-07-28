@@ -1188,7 +1188,8 @@ void Ui::showUpdate() {
     text(JB_B22, 54, 37, "FIRMWARE UPDATE", WHITE, INK);
 
     Updater::Phase ph = updater.phase();
-    bool checking = (ph == Updater::CHECKING) || updater.checkPending();
+    // checkPending only means "Checking…" while idle — never over an offer or an in-flight install.
+    bool checking = (ph == Updater::CHECKING) || (updater.checkPending() && ph == Updater::IDLE);
     if (ph == Updater::AVAILABLE) {
         _updateCheckMs = 0;  // resolved
         text(JB_X36, 28, 138, "Update available", INK);
@@ -1623,7 +1624,7 @@ UiEvent Ui::poll() {
 
     if (_scr == SCR_UPDATE) {
         Updater::Phase ph = updater.phase();
-        bool checking = (ph == Updater::CHECKING) || updater.checkPending();
+        bool checking = (ph == Updater::CHECKING) || (updater.checkPending() && ph == Updater::IDLE);
         if (ph == Updater::AVAILABLE) {
             if (x >= 60 && x <= 440 && y >= 402 && y <= 484) return EV_UPDATE_NOW;    // Update now
             if (x >= 520 && x <= 900 && y >= 402 && y <= 484) return EV_UPDATE_LATER;  // Try again tomorrow

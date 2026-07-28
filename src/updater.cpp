@@ -194,8 +194,13 @@ void Updater::dismissAvailable() {
 }
 
 void Updater::tick() {
-    // Only discover while idle: never interrupt a pending offer or an in-flight install.
-    if (_phase != IDLE && _phase != FAILED) return;
+    // Only discover while idle: never interrupt a pending offer or an in-flight install. Drop a moot
+    // forced check here too (e.g. "Check for updates" tapped while an offer/install is already up) so
+    // checkPending() can't get stuck true and mis-render the update screen as "Checking…".
+    if (_phase != IDLE && _phase != FAILED) {
+        _forceCheck = false;
+        return;
+    }
     bool force = _forceCheck;
     uint32_t now = millis();
     if (!force) {
