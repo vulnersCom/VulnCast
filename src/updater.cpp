@@ -27,12 +27,15 @@
 #ifndef VULNCAST_OTA_REQUIRE_SIGNATURE
 #define VULNCAST_OTA_REQUIRE_SIGNATURE 1
 #endif
-// Discovery cadence (ms) and the first-check delay after boot.
+// Discovery cadence (ms) and the first-check delay after boot. The first check runs at STARTUP (a few
+// seconds in, right after Wi-Fi + the first feed fetch — discovery is an anonymous GitHub GET that runs
+// last in the fetch cycle), not just hourly. It still respects a "try again tomorrow" snooze + skipVer,
+// so a reboot never re-nags an update the user already dismissed.
 #ifndef VULNCAST_OTA_CHECK_INTERVAL_MS
 #define VULNCAST_OTA_CHECK_INTERVAL_MS 3600000UL
 #endif
 #ifndef VULNCAST_OTA_FIRST_CHECK_MS
-#define VULNCAST_OTA_FIRST_CHECK_MS 120000UL
+#define VULNCAST_OTA_FIRST_CHECK_MS 5000UL
 #endif
 
 // Arduino-ESP32 3.x auto-confirms a freshly-flashed image before setup() unless we defer. Returning
