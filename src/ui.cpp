@@ -870,7 +870,14 @@ void Ui::renderDashboard(const UiStatus &st) {
     text(JB_B20, 22, H - 14, "v" VULNCAST_FW_VERSION, WHITE, INK);  // firmware version, bold/bright
     // Remaining Vulners API credits, centered in the footer. Both parts are bold and light (GRAY4
     // collapses to a near-invisible dark grey on the 2-bit panel's black footer, so the label is GRAY6).
-    if (st.creditsKnown) {
+    if (config.rssMode()) {
+        // Zero-credit source: say so instead of the (static) balance.
+        const char *l1 = "SOURCE RSS ", *l2 = "\xC2\xB7 FREE";
+        int tw = textW(JB_B16, l1) + textW(JB_B16, l2);
+        int fx = (W - tw) / 2;
+        fx += text(JB_B16, fx, H - 15, l1, GRAY6, INK);
+        text(JB_B16, fx, H - 15, l2, WHITE, INK);
+    } else if (st.creditsKnown) {
         char cr[24];
         formatCredits(st.apiCredits, cr, sizeof(cr));
         int tw = textW(JB_B16, "API CREDITS ") + textW(JB_B16, cr);
@@ -1121,7 +1128,19 @@ void Ui::showSettings() {
     for (const TzOption &z : TimeKeeper::zones())
         if (timeKeeper.timezone() == z.posix) { tzl = z.label; tzo = z.off; }
     if (tzo.length()) tzl += " \xC2\xB7 " + tzo;
-    text(JB_R19, 210, 470, tzl.c_str(), INK2);
+    textFit(JB_R19, 210, 470, 330, tzl.c_str(), INK2);  // clamp before the SOURCE control
+    // DATA SOURCE — API (Lucene searches, consumes credits) vs RSS (zero-credit firehose +
+    // free search/id enrichment). Segmented control; the active segment is filled.
+    text(JB_B17, 560, 470, "SOURCE", GRAY3);
+    {
+        bool rss = config.rssMode();
+        if (!rss) fillRect(648, 443, 74, 43, INK);
+        else rect(648, 443, 74, 43, 2, GRAY4);
+        textAlign(JB_B17, 648, 470, 74, C, "API", !rss ? PAPER : GRAY4, !rss ? INK : PAPER);
+        if (rss) fillRect(722, 443, 74, 43, INK);
+        else rect(722, 443, 74, 43, 2, GRAY4);
+        textAlign(JB_B17, 722, 470, 74, C, "RSS", rss ? PAPER : GRAY4, rss ? INK : PAPER);
+    }
     rect(824, 443, 112, 43, 2, INK);
     text(JB_B17, 838, 470, "CHANGE", INK);
     gTriRight(915, 458, 12, INK);
@@ -1570,6 +1589,13 @@ UiEvent Ui::poll() {
 
     if (_scr == SCR_SETTINGS) {
         if (backHit) return EV_BACK;
+        // SOURCE segmented control (API <-> RSS): any tap in the control toggles the data source.
+        if (x >= 640 && x <= 804 && y >= 432 && y <= 496) {
+            config.setRssMode(!config.rssMode());
+            channels.feedModeChanged();
+            showSettings();
+            return EV_NONE;
+        }
         if (x >= 824 && y >= 432 && y <= 496) { enterTimezone(); return EV_NONE; }
         if (x >= 12 && x <= 210 && y >= 496 && y <= 540) { showResetConfirm(); return EV_NONE; }  // RESET DEVICE (footer, isolated)
         if (x >= 358 && x <= 602 && y >= 496 && y <= 540) return EV_CHECK_UPDATE;  // CHECK FOR UPDATES (footer, center)

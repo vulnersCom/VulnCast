@@ -17,6 +17,12 @@ public:
     void setApiKey(const String &key);
     void seedApiKeyIfEmpty(const String &seed);
 
+    // Data source: false = API mode (per-channel Lucene searches; consumes Vulners API credits),
+    // true = zero-credit RSS mode (public firehose + credit-free search/id enrichment). Stored in
+    // NVS; toggled from the device Settings screen.
+    bool rssMode();
+    void setRssMode(bool on);
+
     // Factory reset: wipe all persisted config (the Vulners API key). Caller reboots afterwards.
     void factoryReset();
 

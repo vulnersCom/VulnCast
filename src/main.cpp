@@ -521,8 +521,9 @@ void loop() {
 
     // Surface the out-of-credits screen once per exhaustion episode, only when idle on the dashboard and
     // outside the read-grace window. Re-arms when credits recover (a monthly reset or an upgrade).
+    // Zero-credit RSS mode never blocks on the balance — its endpoints (rss.xml + search/id) are free.
     static bool s_creditsShown = false;
-    if (!vulners.creditsExhausted()) {
+    if (!vulners.creditsExhausted() || config.rssMode()) {
         s_creditsShown = false;
     } else if (!s_creditsShown && ui.screen() == SCR_DASHBOARD && millis() - g_lastNav > kNavGraceMs) {
         s_creditsShown = true;
