@@ -10,6 +10,7 @@
 namespace {
 
 constexpr char kUrlLucene[] = "https://vulners.com/api/v3/search/lucene/";
+constexpr char kUrlRss[] = "https://vulners.com/rss.xml";  // public firehose (no key, no credits)
 constexpr char kUrlById[] = "https://vulners.com/api/v3/search/id";
 constexpr char kUrlKeyInfo[] = "https://vulners.com/api/v3/apiKey/info/";  // GET -> data.credit / license_type
 
@@ -358,6 +359,75 @@ bool VulnersClient::fetchById(const String &id, VulnDoc &out, String &err) {
         out.affected.trim();
     }
     out.program = bounded(s["h1team"]["handle"] | "", 40);
+    return true;
+}
+
+bool VulnersClient::fetchRssIds(std::vector<String> &ids, String &err) {
+    WiFiClientSecure client;
+    HTTPClient https;
+    if (!configureHttps(client, https, kUrlRss, 15000)) {
+        err = "begin failed";
+        return false;
+    }
+    const int code = https.GET();
+    if (code != HTTP_CODE_OK) {
+        err = "HTTP " + String(code);
+        https.end();
+        return false;
+    }
+    // Stream-scan for <link>https://vulners.com/<collection>/<ID>?utm…</link>. The ~90 KB feed is
+    // read in chunks and fed through a tiny matcher (collect the text between the literal "<link>"
+    // and the next '<'), so nothing near the full body ever sits on the heap. The channel-level
+    // <link>https://vulners.com</link> has no path and is filtered out; a stray "<link>" inside a
+    // description CDATA can only capture text that fails the vulners.com-prefix check.
+    Stream *st = https.getStreamPtr();
+    static const char kOpen[] = "<link>";
+    int match = 0;
+    bool capturing = false;
+    char cap[220];
+    size_t capN = 0;
+    uint8_t buf[512];
+    uint32_t t0 = millis();
+    while ((client.connected() || client.available()) && millis() - t0 < 20000 &&
+           ids.size() < 120) {
+        int n = st->available() ? st->readBytes(buf, sizeof(buf)) : 0;
+        if (n <= 0) {
+            if (!client.connected() && !client.available()) break;
+            delay(10);
+            continue;
+        }
+        for (int i = 0; i < n; ++i) {
+            char c = (char)buf[i];
+            if (!capturing) {
+                if (c == kOpen[match]) {
+                    if (kOpen[++match] == '\0') { capturing = true; capN = 0; match = 0; }
+                } else {
+                    match = (c == kOpen[0]) ? 1 : 0;
+                }
+            } else if (c == '<' || capN >= sizeof(cap) - 1) {
+                cap[capN] = '\0';
+                capturing = false;
+                String link(cap);
+                int q = link.indexOf('?');
+                if (q >= 0) link.remove(q);
+                constexpr size_t kHostLen = sizeof("https://vulners.com/") - 1;
+                if (link.startsWith("https://vulners.com/")) {
+                    int slash = link.lastIndexOf('/');
+                    if (slash >= (int)kHostLen) {  // a real /<collection>/<id> path
+                        String id = link.substring(slash + 1);
+                        if (id.length() > 0 && id.length() < 80) ids.push_back(id);
+                    }
+                }
+            } else {
+                cap[capN++] = c;
+            }
+        }
+    }
+    https.end();
+    if (ids.empty()) {
+        err = "no items";
+        return false;
+    }
     return true;
 }
 

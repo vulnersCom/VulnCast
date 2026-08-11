@@ -6,6 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include "config.h"  // rssMode() — selects the zero-credit RSS scheduler in tick()
 #include "gfx.h"
 #include "web_ui.h"
 
@@ -481,8 +482,174 @@ bool Channels::serveDetail(VulnersClient &client) {
     return true;
 }
 
+// ---- zero-credit RSS mode ---------------------------------------------------
+// The firehose (vulners.com/rss.xml, public, credit-free) lists the ~100 newest documents of ALL
+// collections. We poll it, enrich each unseen id via the credit-free search/id (one per tick), and
+// match the enriched doc against every active channel's Lucene query — interpreted, not executed:
+// `type:xxx` tokens, `bulletinFamily:exploit`, `cvss.score:[N`, and `bounty:[1` are recognized, so
+// the stock channels (and any custom channel built from those tokens) work unchanged in RSS mode.
+
+namespace {
+
+constexpr uint32_t kRssPollMs = 180000;  // firehose poll cadence (3 min; free, but be a good citizen)
+
+struct RssFilter {
+    String types[8];
+    int ntypes = 0;
+    bool famExploit = false;
+    float minCvss = 0;
+    bool needBounty = false;
+};
+
+RssFilter parseRssFilter(const String &queryIn) {
+    RssFilter f;
+    String q = queryIn;
+    q.toLowerCase();
+    if (q.indexOf("bulletinfamily:exploit") >= 0) f.famExploit = true;
+    int pos = 0;
+    while ((pos = q.indexOf("type:", pos)) >= 0) {
+        int vs = pos + 5, ve = vs;
+        while (ve < (int)q.length() &&
+               (isalnum((unsigned char)q[ve]) || q[ve] == '_' || q[ve] == '-'))
+            ve++;
+        String val = q.substring(vs, ve);
+        if (f.ntypes < 8 && val.length()) f.types[f.ntypes++] = val;
+        pos = ve;
+    }
+    int cs = q.indexOf("cvss.score:[");
+    if (cs >= 0) f.minCvss = q.substring(cs + 12).toFloat();
+    if (q.indexOf("bounty:[") >= 0) f.needBounty = true;
+    return f;
+}
+
+bool rssFilterMatch(const RssFilter &f, const VulnDoc &d) {
+    // Archetype gate: type list and family act as alternatives (stock queries use one OR the other).
+    if (f.ntypes > 0 || f.famExploit) {
+        String ty = d.type, fam = d.family;
+        ty.toLowerCase();
+        fam.toLowerCase();
+        bool ok = false;
+        for (int i = 0; i < f.ntypes && !ok; ++i) ok = (ty == f.types[i]);
+        if (!ok && f.famExploit) ok = (fam == "exploit");
+        if (!ok) return false;
+    }
+    if (f.minCvss > 0 && d.cvss < f.minCvss) return false;
+    if (f.needBounty && d.bounty <= 0) return false;
+    return true;
+}
+
+}  // namespace
+
+bool Channels::rssSeenMark(const String &id) {
+    uint32_t h = 2166136261u;  // FNV-1a
+    for (size_t i = 0; i < id.length(); ++i) h = (h ^ (uint8_t)id[i]) * 16777619u;
+    if (h == 0) h = 1;
+    for (uint32_t v : _rssSeenRing)
+        if (v == h) return true;
+    _rssSeenRing[_rssSeenPos] = h;
+    _rssSeenPos = (_rssSeenPos + 1) % 256;
+    return false;
+}
+
+void Channels::rssOffer(const VulnDoc &d) {
+    if (d.id.isEmpty()) return;
+    lock();
+    bool persist = false;
+    for (size_t i = 0; i < _chans.size(); ++i) {
+        const Channel &c = _chans[i];
+        if (!c.active) continue;
+        if (!rssFilterMatch(parseRssFilter(c.query), d)) continue;
+        ChannelResult &r = _results[i];
+        // Rebuild the top list: existing docs minus any same-id entry, plus the new doc, sorted by
+        // published desc (ISO strings compare chronologically), capped at kFetchLimit.
+        std::vector<VulnDoc> docs;
+        if (r.haveData && !r.champion.id.isEmpty() && r.champion.id != d.id)
+            docs.push_back(r.champion);
+        for (const VulnDoc &cand : r.candidates)
+            if (cand.id != d.id) docs.push_back(cand);
+        size_t at = 0;
+        while (at < docs.size() && docs[at].published > d.published) at++;
+        docs.insert(docs.begin() + at, d);
+        if ((int)docs.size() > kFetchLimit) docs.resize(kFetchLimit);
+
+        String oldChamp = r.champion.id;
+        r.champion = docs.front();
+        r.candidates.assign(docs.begin() + 1, docs.end());
+        r.haveData = true;
+        r.error = "";
+        r.total += 1;  // cumulative matched docs (the firehose has no "total matches" notion)
+        r.updatedMs = millis();
+        time_t now_ts = time(nullptr);
+        r.fetchedAt = (now_ts > 1600000000) ? now_ts : 0;
+        r.attemptMs = r.updatedMs;
+        if (!r.champion.id.isEmpty() && r.champion.id != oldChamp) {
+            _lastUpdatedId = c.id;
+            _updateGen++;
+            persist = true;  // a visible headline change is worth a flash write
+        }
+    }
+    if (persist) saveData();
+    unlock();
+}
+
+void Channels::rssTick(VulnersClient &client) {
+    // 1) Drain: enrich ONE queued id per tick via the credit-free search/id (keeps ticks short;
+    //    a full firehose of ~100 new ids fills the channels over ~2 minutes after first boot).
+    String id;
+    lock();
+    if (!_rssQueue.empty()) {
+        id = _rssQueue.front();
+        _rssQueue.erase(_rssQueue.begin());
+    }
+    unlock();
+    if (id.length()) {
+        VulnDoc d;
+        String err;
+        if (client.fetchById(id, d, err)) {
+            _fetchProvenKey = true;  // HTTP 200 with this X-Api-Key -> the key is valid
+            rssOffer(d);
+        } else {
+            Serial.printf("[rss] enrich %s failed: %s\n", id.c_str(), err.c_str());
+        }
+        return;
+    }
+    // 2) Poll the firehose when due.
+    uint32_t now = millis();
+    if (_rssLastPollMs != 0 && (uint32_t)(now - _rssLastPollMs) < kRssPollMs) return;
+    _rssLastPollMs = now;
+    std::vector<String> ids;
+    String err;
+    if (!client.fetchRssIds(ids, err)) {
+        Serial.printf("[rss] poll failed: %s\n", err.c_str());
+        _rssLastPollMs = now - (kRssPollMs > 30000 ? kRssPollMs - 30000 : 0);  // retry in ~30s
+        return;
+    }
+    int fresh = 0;
+    lock();
+    for (const String &i : ids) {
+        if (rssSeenMark(i)) continue;
+        _rssQueue.push_back(i);
+        fresh++;
+    }
+    unlock();
+    Serial.printf("[rss] poll: %d items, %d new\n", (int)ids.size(), fresh);
+}
+
+void Channels::feedModeChanged() {
+    lock();
+    _rssLastPollMs = 0;  // RSS mode: poll on the next tick
+    _rssQueue.clear();
+    for (ChannelResult &r : _results) r.attemptMs = 0;  // API mode: every channel is due again
+    unlock();
+}
+
 void Channels::tick(VulnersClient &client) {
     if (serveDetail(client)) return;  // detail fetch is top priority; keep this tick short
+
+    if (config.rssMode()) {
+        rssTick(client);
+        return;
+    }
 
     // Pick the single most-overdue active channel (never-fetched wins).
     String id, query;

@@ -35,6 +35,12 @@ void Config::seedApiKeyIfEmpty(const String &seed) {
     prefs.putString("vulnersKey", seed);
 }
 
+bool Config::rssMode() { return _ready && prefs.getBool("rssMode", false); }
+
+void Config::setRssMode(bool on) {
+    if (_ready) prefs.putBool("rssMode", on);
+}
+
 void Config::factoryReset() {
     if (_ready) prefs.clear();  // wipe the "vulncast" NVS namespace (the API key)
 }

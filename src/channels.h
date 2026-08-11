@@ -62,9 +62,14 @@ public:
     void begin();                        // mount LittleFS, load or seed defaults
     void registerRoutes(WebServer &s);   // attach REST API + admin page to the shared server
 
-    // Runs on the network task (core 0). Fetches at most one due active channel
-    // per call (spreads load, keeps each call short). No-op if none are due.
+    // Runs on the network task (core 0). In API mode: fetches at most one due active channel per
+    // call. In zero-credit RSS mode: polls the public firehose and enriches one document per call
+    // via the credit-free search/id, matching results against the channel queries. Either way each
+    // call stays short (one network operation max).
     void tick(VulnersClient &client);
+
+    // The data source toggled (Settings) — re-arm the schedulers so the new mode starts immediately.
+    void feedModeChanged();
 
     // Request an immediate refetch of one channel (manual button, from web or device
     // UI). Works for both auto and manual channels. Returns false if id is unknown.
@@ -109,6 +114,15 @@ public:
 
 private:
     bool serveDetail(VulnersClient &client);  // top-priority on-demand detail fetch (tick helper)
+
+    // ---- zero-credit RSS mode (see tick) ----
+    void rssTick(VulnersClient &client);      // poll firehose / drain one enrichment per call
+    void rssOffer(const VulnDoc &d);          // match an enriched doc against every active channel
+    bool rssSeenMark(const String &id);       // true = already seen; else marks it (hash ring)
+    uint32_t _rssLastPollMs = 0;              // 0 = poll immediately (boot / mode switch)
+    std::vector<String> _rssQueue;            // ids awaiting enrichment, newest first
+    uint32_t _rssSeenRing[256] = {0};         // FNV-1a hashes of recently offered ids
+    int _rssSeenPos = 0;
 
     std::vector<Channel> _chans;
     std::vector<ChannelResult> _results;  // parallel to _chans by index

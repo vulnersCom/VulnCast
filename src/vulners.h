@@ -51,7 +51,14 @@ public:
 
     // Detail fetch: POST /api/v3/search/id for a single id. Fills `out` with the
     // full document (including description + cvelist). Returns false on failure.
+    // NOTE: credit-FREE for every account tier since Vulners' 2025 access update —
+    // the zero-credit RSS mode leans on this for enrichment.
     bool fetchById(const String &id, VulnDoc &out, String &err);
+
+    // Zero-credit firehose: GET vulners.com/rss.xml (public, no key, no credits) and stream-extract
+    // the document ids of the latest ~100 documents across all collections, newest first. The feed
+    // is ~90 KB, so it is scanned incrementally off the TLS stream — never buffered whole.
+    bool fetchRssIds(std::vector<String> &ids, String &err);
 
     // Validate an API key against Vulners (does not store it). Sets err on failure.
     static bool validateKey(const String &key, String &err);
